@@ -1,6 +1,6 @@
 # nte-rhythm-auto
 
-异环（Neverness to Everness）**超强音自动点击项目**：通过**窗口截图 + OpenCV HSV 检测**判定线附近的音符像素，并在触发时模拟按下 **D / F / J / K**（可在配置中修改）。
+异环（Neverness to Everness）**超强音自动点击项目**：通过**窗口截图 + OpenCV HSV 检测**判定线附近的音符像素，并在触发时模拟按下 **D / F / J / K**（键位与游戏内一致，已锁死，不可改键）。
 
 > **风险说明**：第三方自动化可能违反游戏用户协议，存在封号等后果。本项目仅供学习计算机视觉与自动化接口，请自行承担使用风险。
 
@@ -9,13 +9,16 @@
 - Windows 10/11
 - 游戏进程名通常为 `HTGame.exe`，窗口类名 `UnrealWindow`（与 [ok-nte](https://github.com/BnanZ0/ok-nte) 一致）
 - 推荐游戏设置：**1280×720（16:9）+ 30 FPS**
+- **游戏请使用「无边框窗口」模式**；独占全屏下 WGC 抓图可能失败或抓不到帧
 - 分辨率可以换，但请保持 **16:9**；检测参数已尽量按比例换算，非 16:9 需要重新校准轨道
 - 当前默认使用 **WGC（Windows Graphics Capture）** 截图，不会被其它 app 遮挡
 - 当前默认使用 **前台按键**，运行时请让游戏窗口保持前台焦点
-- 若尝试后台 HWND 按键，请用**管理员权限**运行终端；异环/UE 可能仍不吃普通 `WM_KEYDOWN` 消息
+- exe 已内置以管理员权限启动；右键以管理员运行依然可以但不再是必须
+- 键位锁定为 **D / F / J / K**，与游戏内一致，不开放修改
 
 ## 使用者下载
 
+不需要安装 Python。
 
 1. 打开 [GitHub Release 下载页](https://github.com/Gloaming02/nte-rhythm-auto/releases/latest)。
 2. 下载 `nte-rhythm-auto-win64.zip`。
@@ -63,8 +66,10 @@ pip install -r requirements.txt
 - `lanes.center_x_frac`：四条轨道中心的水平比例（需与画面上的鼓位对齐）
 - `lanes.judge_line_y_frac`：判定线纵向位置
 - `hsv_ranges`：每条轨道音符环的大致 HSV 范围，可按 `test-image` 输出图微调
-- `keys.mode`：默认 **`foreground`**（pynput 前台输入）；`background` 为 HWND 消息模式，异环/UE 不一定响应。
-- `keys.press_delay_sec` / `keys.key_hold_sec`：不同设备可调的按键延迟与保持时间；GUI 中以秒显示。
+- `keys.mode`：默认 **`foreground`**（pynput 前台输入）；`background` 为 HWND 消息模式，异环/UE 不一定响应
+- `keys.press_delay_sec` / `keys.key_hold_sec`：不同设备可调的按键延迟与保持时间；GUI 中以秒显示
+
+> 键位锁死为 **D / F / J / K**，配置文件不再支持自定义按键。
 
 ## 开发者用法
 
@@ -116,11 +121,13 @@ python -m src test-image path\to\screenshot.png --out-vis debug_frames\out.png
 ```powershell
 .\.venv\Scripts\Activate.ps1
 pip install pyinstaller
-pyinstaller --noconfirm --clean --onefile --windowed `
+pyinstaller --noconfirm --clean --onefile --windowed --uac-admin `
   --name nte-rhythm-auto `
   --add-data "configs\default.yaml;configs" `
   run_gui.py
 ```
+
+`--uac-admin` 让 exe 双击启动时弹 UAC 提升为管理员，避免普通权限下 `pynput` 按键被系统拦截。
 
 产物在 `dist\nte-rhythm-auto.exe`。发布到 GitHub Release 时建议打包 zip，包含：
 

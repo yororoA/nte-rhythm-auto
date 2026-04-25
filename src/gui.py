@@ -27,9 +27,6 @@ class RhythmAutoGUI:
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self.var_config = tk.StringVar(value=str(default_config.resolve()))
-        self.var_debug = tk.BooleanVar(value=False)
-        self.var_show = tk.BooleanVar(value=False)
-        self.var_debug_interval = tk.StringVar(value="0.5")
         self.var_press_delay_sec = tk.StringVar(value="0.000")
         self.var_key_hold_sec = tk.StringVar(value="0.010")
         self.var_capture_interval_sec = tk.StringVar(value="0.011")
@@ -112,13 +109,6 @@ class RhythmAutoGUI:
         if p:
             self.var_config.set(p)
 
-    def _parse_debug_interval(self) -> float:
-        try:
-            v = float(self.var_debug_interval.get().strip())
-            return max(0.1, min(v, 10.0))
-        except ValueError:
-            return 0.5
-
     def _parse_sec(self, var: tk.StringVar, default_sec: float, min_sec: float, max_sec: float) -> float:
         try:
             v = float(var.get().strip())
@@ -163,7 +153,7 @@ class RhythmAutoGUI:
         args = Namespace(
             debug=False,
             show=False,
-            debug_interval=self._parse_debug_interval(),
+            debug_interval=0.5,
         )
 
         self.btn_start.configure(state=tk.DISABLED)

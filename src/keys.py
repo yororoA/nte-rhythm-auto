@@ -12,8 +12,9 @@ import win32gui
 
 logger = logging.getLogger(__name__)
 
-# 字母键虚拟键码（与 ASCII 大写一致）
-_VK = {"d": 0x44, "f": 0x46, "j": 0x4A, "k": 0x4B}
+# 异环超强音玩法固定使用 D / F / J / K 四键，键位不开放配置。
+_LANES: tuple[str, str, str, str] = ("d", "f", "j", "k")
+_VK: dict[str, int] = {"d": 0x44, "f": 0x46, "j": 0x4A, "k": 0x4B}
 
 
 def _lparam_keydown(vk: int) -> int:
@@ -29,9 +30,7 @@ def _lparam_keyup(vk: int) -> int:
 class KeySender:
     def __init__(self, cfg: dict[str, Any], hwnd: int | None) -> None:
         keys_cfg = cfg.get("keys") or {}
-        self._lanes = [str(x).lower() for x in (keys_cfg.get("lanes") or ["d", "f", "j", "k"])]
-        if len(self._lanes) != 4:
-            raise ValueError("keys.lanes 必须为 4 个键名")
+        self._lanes: list[str] = list(_LANES)
         self._mode = str(keys_cfg.get("mode", "foreground")).lower()
         self._hold = float(keys_cfg.get("key_hold_sec", 0.02))
         self._delay = max(0.0, float(keys_cfg.get("press_delay_sec", 0.0)))
@@ -60,10 +59,7 @@ class KeySender:
 
     def press_lane(self, lane_index: int) -> None:
         key = self._lanes[lane_index]
-        vk = _VK.get(key)
-        if vk is None:
-            logger.warning("不支持的键位: %s", key)
-            return
+        vk = _VK[key]
         if self._delay > 0:
             time.sleep(self._delay)
 

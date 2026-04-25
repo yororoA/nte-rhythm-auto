@@ -14,7 +14,7 @@ from typing import Any
 import cv2
 import numpy as np
 
-from src.capture import grab_game_client_bgr
+from src.capture import grab_game_client_bgr, stop_wgc_grabber
 from src.config_loader import default_config_path, load_config
 from src.detector import RhythmDetector
 from src.keys import KeySender
@@ -137,6 +137,8 @@ def run_loop(
     ema_fps = 0.0
     last_status_t = time.perf_counter()
     suppress_hint_logged = False
+    consecutive_grab_failures = 0
+    max_grab_failures_before_relookup = 30
 
     logger.info("按 Ctrl+C 停止。窗口: %s", info.title or "(无标题)")
     if (cfg.get("presence") or {}).get("enabled", True):
@@ -151,12 +153,30 @@ def run_loop(
             if stop_event is not None and stop_event.is_set():
                 break
             t0 = time.perf_counter()
-            cr = client_rect_screen(hwnd)
-            wr = window_rect_screen(hwnd)
-            sx, sy, ex, ey = cr
-            w, h = ex - sx, ey - sy
+            try:
+                cr = client_rect_screen(hwnd)
+                wr = window_rect_screen(hwnd)
+                sx, sy, ex, ey = cr
+                w, h = ex - sx, ey - sy
+            except Exception as e:
+                consecutive_grab_failures += 1
+                logger.warning("读取窗口矩形失败：%s（连续 %d 次）", e, consecutive_grab_failures)
+                w = h = 0
             if w <= 0 or h <= 0:
-                logger.warning("窗口尺寸异常，等待…")
+                consecutive_grab_failures += 1
+                logger.warning("窗口尺寸异常（连续 %d 次），等待…", consecutive_grab_failures)
+                if consecutive_grab_failures >= max_grab_failures_before_relookup:
+                    logger.warning("游戏窗口疑似已失效，重新查找 HTGame.exe…")
+                    stop_wgc_grabber()
+                    info = None
+                    while info is None:
+                        if stop_event is not None and stop_event.is_set():
+                            return 1
+                        info = find_unreal_game_window(exe_name=exe, class_name=cls)
+                        if info is None:
+                            time.sleep(0.5)
+                    hwnd = info.hwnd
+                    consecutive_grab_failures = 0
                 time.sleep(0.5)
                 continue
 
@@ -168,8 +188,22 @@ def run_loop(
                     window_rect=wr,
                     use_client=use_client,
                 )
+                consecutive_grab_failures = 0
             except RuntimeError as e:
-                logger.warning("%s；本帧跳过，不使用屏幕截图回退", e)
+                consecutive_grab_failures += 1
+                logger.warning("%s；本帧跳过（连续 %d 次失败）", e, consecutive_grab_failures)
+                if consecutive_grab_failures >= max_grab_failures_before_relookup:
+                    logger.warning("截图持续失败，重置 WGC 会话并重新查找窗口…")
+                    stop_wgc_grabber()
+                    info = None
+                    while info is None:
+                        if stop_event is not None and stop_event.is_set():
+                            return 1
+                        info = find_unreal_game_window(exe_name=exe, class_name=cls)
+                        if info is None:
+                            time.sleep(0.5)
+                    hwnd = info.hwnd
+                    consecutive_grab_failures = 0
                 time.sleep(0.2)
                 continue
             fh, fw = frame.shape[:2]
@@ -268,6 +302,7 @@ def run_loop(
     except KeyboardInterrupt:
         logger.info("已停止。")
     finally:
+        stop_wgc_grabber()
         if args.show:
             try:
                 cv2.destroyAllWindows()
@@ -323,11 +358,11 @@ def cmd_test_image(args: argparse.Namespace, cfg: dict) -> int:
     out = Path(args.out_vis) if args.out_vis else path.with_name(path.stem + "_vis.png")
     cv2.imwrite(str(out), vis)
     hsv_ranges = list(cfg.get("hsv_ranges") or [])
-    keys_lanes = list((cfg.get("keys") or {}).get("lanes") or ["d", "f", "j", "k"])
+    fixed_keys = ("d", "f", "j", "k")
     for i, fired in enumerate(triggers):
         if fired:
             rn = (hsv_ranges[i] if i < len(hsv_ranges) else {}).get("name", "?")
-            kn = keys_lanes[i] if i < len(keys_lanes) else "?"
+            kn = fixed_keys[i] if i < len(fixed_keys) else "?"
             logger.info(
                 "test-image 触发 | 轨道=%d | HSV配置名=%s | 判定带像素=%d (阈值=%d) | 将对应按键=%s",
                 i + 1,

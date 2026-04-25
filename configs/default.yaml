@@ -110,8 +110,8 @@ detection:
   log_pixels_interval_sec: 0.5
 
 keys:
-  lanes: ["d", "f", "j", "k"]
-  # background: 向游戏 HWND 发 WM_KEYDOWN/UP（不占前台焦点，与 Noki/ok 思路一致）；不响应时改 foreground 或试 send
+  # 键位锁死为 D / F / J / K，不开放配置
+  # background: 向游戏 HWND 发 WM_KEYDOWN/UP（不占前台焦点）；不响应时改 foreground 或试 send
   mode: "foreground"
   # post | send — UE 若不认 PostMessage 可试 send；后台模式建议管理员权限运行
   win32_dispatch: "send"

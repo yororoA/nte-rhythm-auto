@@ -87,7 +87,13 @@ def _crop_wgc_client(hwnd: int, frame: "NDArray[np.uint8]") -> "NDArray[np.uint8
 
 class _WgcWindowGrabber:
     def __init__(self, hwnd: int) -> None:
-        from windows_capture import WindowsCapture
+        try:
+            from windows_capture import WindowsCapture
+        except ImportError as e:
+            raise RuntimeError(
+                "未安装 windows-capture（WGC 截图依赖），无法启动 WGC 模式。"
+                "请 pip install windows-capture，或将 configs/default.yaml 的 capture.method 改为 win32。"
+            ) from e
 
         self.hwnd = int(hwnd)
         self._lock = threading.Lock()
@@ -140,6 +146,17 @@ def grab_bgr_wgc_client(hwnd: int, timeout_sec: float = 1.0) -> "NDArray[np.uint
             _WGC_GRABBER.stop()
         _WGC_GRABBER = _WgcWindowGrabber(hwnd)
     return _WGC_GRABBER.grab(timeout_sec)
+
+
+def stop_wgc_grabber() -> None:
+    """主循环退出时调用，避免 WGC 后台线程残留。"""
+    global _WGC_GRABBER
+    if _WGC_GRABBER is not None:
+        try:
+            _WGC_GRABBER.stop()
+        except Exception:
+            pass
+        _WGC_GRABBER = None
 
 
 def _bitblt_client_copy(

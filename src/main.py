@@ -14,7 +14,7 @@ from typing import Any
 import cv2
 import numpy as np
 
-from src.capture import grab_game_client_bgr, stop_wgc_grabber
+from src.capture import capture_runtime_status, grab_game_client_bgr, stop_wgc_grabber
 from src.config_loader import default_config_path, load_config
 from src.detector import RhythmDetector
 from src.keys import KeySender
@@ -84,7 +84,10 @@ def run_loop(
     if cap_method == "mss":
         logger.info("截图方式: mss（按屏幕矩形，若有窗口叠在游戏上会截到叠层）")
     elif cap_method == "wgc":
-        logger.info("截图方式: wgc（Windows Graphics Capture，按游戏窗口抓帧，不吃其它 app 遮挡）")
+        if bool(cap_cfg.get("fallback_to_mss", True)):
+            logger.info("截图方式: wgc（失败时自动 fallback 到前台直截；fallback 会吃遮挡）")
+        else:
+            logger.info("截图方式: wgc（Windows Graphics Capture，按游戏窗口抓帧，不吃其它 app 遮挡）")
     else:
         logger.info("截图方式: win32（GDI 窗口截图；异环/UE 场景可能吃遮挡）")
 
@@ -209,6 +212,8 @@ def run_loop(
             except RuntimeError as e:
                 consecutive_grab_failures += 1
                 logger.warning("%s；本帧跳过（连续 %d 次失败）", e, consecutive_grab_failures)
+                if status_callback:
+                    status_callback({"capture_error": str(e)})
                 if consecutive_grab_failures >= max_grab_failures_before_relookup:
                     logger.warning("截图持续失败，重置 WGC 会话并重新查找窗口…")
                     stop_wgc_grabber()
@@ -298,6 +303,7 @@ def run_loop(
                         "scene_lap": tuple(
                             round(float(x), 0) for x in gate_info.get("lap_vars", ())
                         ),
+                        "capture": capture_runtime_status(),
                     }
                 )
 

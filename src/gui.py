@@ -52,7 +52,7 @@ class RhythmAutoGUI:
             "2. 测试用的是 1280x720p、30 FPS。\n"
             "3. 确保使用管理员权限打开。\n"
             "4. 默认值如果没什么问题不需要调整。\n"
-            "5. 保持游戏在前台。"
+            "5. 保持游戏在前台；WGC 不可用时会 fallback 到前台直截，窗口遮挡会影响识别。"
         )
         tk.Label(frm, text=warning, wraplength=660, justify=tk.LEFT, fg="#c00000").grid(
             row=1, column=0, columnspan=3, sticky=tk.W, **pad
@@ -205,6 +205,9 @@ class RhythmAutoGUI:
         if err := data.get("error"):
             self.var_status.set(f"错误: {err}")
             return
+        if capture_error := data.get("capture_error"):
+            self.var_status.set(f"截图连接失败，正在自动重试…\n{capture_error}")
+            return
         fps = data.get("ema_fps", 0.0)
         pr = data.get("presses", (0, 0, 0, 0))
         w, h = data.get("size", (0, 0))
@@ -227,9 +230,18 @@ class RhythmAutoGUI:
                 )
             else:
                 scene_s = f"\n门控: {'已解锁可按键' if armed else '锁定中(不按键)'}"
+        capture_s = ""
+        capture = data.get("capture")
+        if isinstance(capture, dict) and capture.get("fallback_active"):
+            reason = capture.get("fallback_reason") or "WGC 连接失败"
+            capture_s = (
+                "\n截图: WGC 连接失败，已切换到前台截图。"
+                "请保持游戏在最前面，不能被其它窗口遮挡。"
+                f"\n原因: {reason}"
+            )
         self.var_status.set(
             f"运行中 | ~{fps:.0f} FPS | 画面 {w}x{h} | D/F/J/K 累计: {pr[0]}/{pr[1]}/{pr[2]}/{pr[3]}"
-            f"\n窗口: {title}{tr_s}{px_s}{scene_s}"
+            f"\n窗口: {title}{tr_s}{px_s}{scene_s}{capture_s}"
         )
 
     def _stop_worker(self) -> None:

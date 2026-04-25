@@ -21,6 +21,28 @@ logger = logging.getLogger(__name__)
 _MIN_BRIGHT = 4.0  # 均值低于此视为无效/黑屏，继续尝试下一种截法
 _WGC_GRABBER: "_WgcWindowGrabber | None" = None
 _WGC_LOCK = threading.Lock()
+_WGC_FALLBACK_REASON: str | None = None
+_WGC_FALLBACK_LOGGED = False
+
+
+def _friendly_wgc_error(error: Exception) -> str:
+    raw = str(error).strip() or error.__class__.__name__
+    if "Failed to convert item to GraphicsCaptureItem" in raw or "Failed to convert item to GraphicsCaptureltem" in raw:
+        return (
+            "WGC 无法连接到游戏窗口。常见原因：Windows 10 图形捕获兼容性不足、"
+            "游戏窗口最小化/独占全屏、游戏刚切换窗口还没稳定，或工具与游戏权限不一致。"
+        )
+    if "graphics capture" in raw.lower() or "wgc" in raw.lower():
+        return f"WGC 截图连接失败：{raw}"
+    return raw
+
+
+def capture_runtime_status() -> dict[str, Any]:
+    """返回当前截图状态，供 GUI 显示。"""
+    return {
+        "fallback_active": _WGC_FALLBACK_REASON is not None,
+        "fallback_reason": _WGC_FALLBACK_REASON,
+    }
 
 
 def grab_bgr(left: int, top: int, width: int, height: int) -> "NDArray[np.uint8]":
@@ -162,7 +184,7 @@ def grab_bgr_wgc_client(hwnd: int, timeout_sec: float = 1.0) -> "NDArray[np.uint
 
 def stop_wgc_grabber() -> None:
     """主循环退出时调用，避免 WGC 后台线程残留。"""
-    global _WGC_GRABBER
+    global _WGC_GRABBER, _WGC_FALLBACK_REASON, _WGC_FALLBACK_LOGGED
     with _WGC_LOCK:
         if _WGC_GRABBER is not None:
             try:
@@ -170,6 +192,33 @@ def stop_wgc_grabber() -> None:
             except Exception:
                 pass
             _WGC_GRABBER = None
+        _WGC_FALLBACK_REASON = None
+        _WGC_FALLBACK_LOGGED = False
+
+
+def _grab_frontmost_fallback_bgr(
+    hwnd: int,
+    cap_cfg: dict[str, Any],
+    *,
+    client_rect: tuple[int, int, int, int],
+    window_rect: tuple[int, int, int, int],
+    use_client: bool,
+    reason: str,
+) -> "NDArray[np.uint8]":
+    """WGC 不可用时退到屏幕矩形截图；要求游戏窗口在最前面。"""
+    global _WGC_FALLBACK_LOGGED
+    sx, sy, ex, ey = client_rect if use_client else window_rect
+    try:
+        if win32gui.IsIconic(hwnd):
+            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+        win32gui.BringWindowToTop(hwnd)
+        win32gui.SetForegroundWindow(hwnd)
+    except Exception as e:
+        logger.debug("fallback 置前游戏窗口失败：%s", e)
+    if not _WGC_FALLBACK_LOGGED:
+        logger.warning("WGC 不可用，已切换到前台截图：%s 请保持游戏窗口在最前面，否则会截到遮挡窗口。", reason)
+        _WGC_FALLBACK_LOGGED = True
+    return _resize_to_configured_size(grab_bgr(sx, sy, ex - sx, ey - sy), cap_cfg)
 
 
 def _bitblt_client_copy(
@@ -349,7 +398,33 @@ def grab_game_client_bgr(
         return _resize_to_configured_size(grab_bgr(sx, sy, ex - sx, ey - sy), cap_cfg)
 
     if method == "wgc":
-        return _resize_to_configured_size(grab_bgr_wgc_client(hwnd), cap_cfg)
+        global _WGC_FALLBACK_REASON
+        fallback_enabled = bool(cap_cfg.get("fallback_to_mss", True))
+        if fallback_enabled and _WGC_FALLBACK_REASON:
+            return _grab_frontmost_fallback_bgr(
+                hwnd,
+                cap_cfg,
+                client_rect=client_rect,
+                window_rect=window_rect,
+                use_client=use_client,
+                reason=_WGC_FALLBACK_REASON,
+            )
+        try:
+            return _resize_to_configured_size(grab_bgr_wgc_client(hwnd), cap_cfg)
+        except Exception as e:
+            reason = _friendly_wgc_error(e)
+            if not fallback_enabled:
+                raise RuntimeError(f"{reason} 可在配置中开启 capture.fallback_to_mss 使用前台截图。") from e
+            stop_wgc_grabber()
+            _WGC_FALLBACK_REASON = reason
+            return _grab_frontmost_fallback_bgr(
+                hwnd,
+                cap_cfg,
+                client_rect=client_rect,
+                window_rect=window_rect,
+                use_client=use_client,
+                reason=reason,
+            )
 
     if not use_client:
         logger.warning("capture.method=win32 时暂只支持客户区；已按客户区截取。")

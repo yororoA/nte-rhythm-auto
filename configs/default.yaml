@@ -9,8 +9,10 @@ capture:
   # 使用客户区可避免标题栏偏移；false 则用整窗 GetWindowRect
   use_client_area: true
   # wgc: Windows Graphics Capture，按异环窗口抓帧，不吃其它 app 遮挡
+  # 如果 WGC 在部分 Win10 上不可用，会自动 fallback 到 mss 前台直截；此时必须保持游戏在最前面
   # win32: GDI 客户区截图，异环/UE 场景已验证会吃遮挡；mss: 屏幕矩形截图，也会吃遮挡
   method: wgc
+  fallback_to_mss: true
   # 0 表示使用当前游戏窗口实际客户区尺寸；检测参数按比例换算，适配 720p/1080p
   target_width: 0
   target_height: 0

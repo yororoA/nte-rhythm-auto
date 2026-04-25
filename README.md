@@ -16,7 +16,6 @@
 
 ## 使用者下载
 
-不需要安装 Python。
 
 1. 打开 [GitHub Release 下载页](https://github.com/Gloaming02/nte-rhythm-auto/releases/latest)。
 2. 下载 `nte-rhythm-auto-win64.zip`。

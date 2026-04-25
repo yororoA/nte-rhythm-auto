@@ -10,7 +10,11 @@ import yaml
 
 
 def default_config_path() -> Path:
-    """开发环境读仓库配置；PyInstaller 打包后读内置资源配置。"""
+    """优先读 exe 同目录配置；开发环境读仓库配置；打包后兜底读内置配置。"""
+    if getattr(sys, "frozen", False):
+        external = Path(sys.executable).resolve().parent / "configs" / "default.yaml"
+        if external.is_file():
+            return external
     if hasattr(sys, "_MEIPASS"):
         return Path(sys._MEIPASS) / "configs" / "default.yaml"  # type: ignore[attr-defined]
     return Path(__file__).resolve().parent.parent / "configs" / "default.yaml"

@@ -95,9 +95,9 @@ class _WgcWindowGrabber:
         self._closed = False
         self._last_frame: "NDArray[np.uint8] | None" = None
         self._capture = WindowsCapture(
-            cursor_capture=False,
-            draw_border=False,
-            secondary_window=False,
+            cursor_capture=None,
+            draw_border=None,
+            secondary_window=None,
             window_hwnd=self.hwnd,
         )
 

@@ -79,8 +79,8 @@ presence:
   min_laplace_variance: 95
   min_mean_gray: 18
   max_mean_gray: 255
-  # 连续多少帧四鼓位都通过检测才允许按键
-  arm_after_good_frames: 5
+  # 连续多少帧四鼓位都通过检测才允许按键；开局音符很快，过高会漏第一拍
+  arm_after_good_frames: 1
   # 连续多少帧不达标则重新禁止按键（离开节奏页）
   disarm_after_bad_frames: 5
 

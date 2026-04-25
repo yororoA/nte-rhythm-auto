@@ -1,0 +1,125 @@
+# 坐标均为相对游戏窗口客户区或截图区域的 0~1 比例（左上为原点）
+# 若截图含标题栏，可适当上移 judge_line_y 或调小 roi 高度
+
+window:
+  exe_name: "HTGame.exe"
+  class_name: "UnrealWindow"
+
+capture:
+  # 使用客户区可避免标题栏偏移；false 则用整窗 GetWindowRect
+  use_client_area: true
+  # wgc: Windows Graphics Capture，按异环窗口抓帧，不吃其它 app 遮挡
+  # win32: GDI 客户区截图，异环/UE 场景已验证会吃遮挡；mss: 屏幕矩形截图，也会吃遮挡
+  method: wgc
+  # 0 表示使用当前游戏窗口实际客户区尺寸；检测参数按比例换算，适配 720p/1080p
+  target_width: 0
+  target_height: 0
+
+lanes:
+  # 四条轨道判定区/鼓心中心 x（从左到右对应 D F J K）
+  center_x_frac: [0.225, 0.406, 0.596, 0.771]
+  # 四条轨道在上方观察区的中心 x；D/K 外侧轨道是斜线，顶部与鼓心不同
+  top_center_x_frac: [0.214, 0.406, 0.596, 0.783]
+  # 每条轨道检测条带半宽占画面宽的比例
+  half_width_frac: 0.028
+  # 判定线 y（音符落到此处附近触发）；略上移可减少与鼓面重叠
+  judge_line_y_frac: 0.78
+  # 单轨判定线；F 轨黄色会吃到底部静态鼓面，单独上移避开常亮黄色按钮
+  judge_line_y_frac_by_lane: [0.78, 0.70, 0.78, 0.78]
+  # 在判定线上下各取多少高度作为检测带（比例）
+  judge_band_half_height_frac: 0.03
+  # 判定带竖直方向只保留「靠上」的比例（1=整条；0.5≈上半段，避开下方鼓圈/光晕）
+  judge_band_keep_from_top: 0.52
+  # 在判定线上方延伸 ROI 用于观察下落的音符（比例）
+  roi_top_y_frac: 0.35
+
+# HSV 颜色范围（OpenCV: H 0-179）。每条轨道一组，对应游戏内蓝/黄/红/紫环
+hsv_ranges:
+  - name: d
+    h_min: 90
+    h_max: 125
+    s_min: 60
+    s_max: 255
+    v_min: 120
+    v_max: 255
+  # 黄/金轨易与鼓面光效混淆，略收紧；仍漏检可稍放宽 h
+  - name: f
+    h_min: 18
+    h_max: 38
+    s_min: 95
+    s_max: 255
+    v_min: 165
+    v_max: 255
+  - name: j
+    h_min: 0
+    h_max: 12
+    s_min: 80
+    s_max: 255
+    v_min: 120
+    v_max: 255
+    # 红色跨 H=0：第二段高色调
+    h2_min: 165
+    h2_max: 179
+  - name: k
+    h_min: 125
+    h_max: 165
+    s_min: 50
+    s_max: 255
+    v_min: 100
+    v_max: 255
+
+# 节奏界面门控：未检测到四个鼓位 UI 时一律不按键，避免主界面误触 F 等
+presence:
+  enabled: true
+  # 鼓面采样中心 y（0~1），略低于判定线、贴近鼓圈
+  drum_center_y_frac: 0.80
+  # 每个鼓位正方形补丁的半边长占画面宽的比例
+  patch_half_width_frac: 0.034
+  # 灰度 Laplacian 方差下限（越大越要求「有清晰边缘纹理」）
+  min_laplace_variance: 95
+  min_mean_gray: 18
+  max_mean_gray: 255
+  # 连续多少帧四鼓位都通过检测才允许按键
+  arm_after_good_frames: 5
+  # 连续多少帧不达标则重新禁止按键（离开节奏页）
+  disarm_after_bad_frames: 5
+
+detection:
+  # 启用轨道：D/F/J/K
+  enabled_lanes: [true, true, true, true]
+  # 连续同轨会挤在一起，使用独立音符块识别；F 轨黄色易吃静态鼓面，保持普通判定带逻辑
+  component_mode_lanes: [true, false, true, true]
+  component_min_area_frac: 0.000043
+  component_lookahead_y_frac: 0.083
+  component_past_y_frac: 0.032
+  component_same_note_y_frac: 0.032
+  component_history_sec: 0.25
+  # 判定带内掩膜像素数超过此值认为有音符
+  min_pixels_per_lane: 200
+  # 按轨单独阈值；F 轨按 J 轨同样逻辑处理，避免黄色音符临界时漏检
+  min_pixels_by_lane: [200, 200, 200, 200]
+  # 同一条轨道触发后的冷却（秒）
+  cooldown_sec: 0.12
+  # 连续同轨音符更密时需要更短冷却；当前重点调 D/K
+  cooldown_sec_by_lane: [0.05, 0.05, 0.05, 0.05]
+  # 可选：在掩膜上做开运算核大小，降噪
+  morph_kernel: 3
+  # true 时：像素够但处于冷却 -> DEBUG（已节流，避免刷屏）
+  log_cooldown_debug: true
+  # 每隔 N 秒打 DEBUG：四条轨当前判定带像素（0 表示关闭）
+  log_pixels_interval_sec: 0.5
+
+keys:
+  lanes: ["d", "f", "j", "k"]
+  # background: 向游戏 HWND 发 WM_KEYDOWN/UP（不占前台焦点，与 Noki/ok 思路一致）；不响应时改 foreground 或试 send
+  mode: "foreground"
+  # post | send — UE 若不认 PostMessage 可试 send；后台模式建议管理员权限运行
+  win32_dispatch: "send"
+  # 启动时发一次 WM_ACTIVATE，部分 UE 窗口更易吃后台键
+  fake_activate: true
+  # 识别触发后额外等待多少秒再按键；不同机器可在 GUI 里调，默认 0
+  press_delay_sec: 0.0
+  key_hold_sec: 0.01
+
+run:
+  target_fps: 90

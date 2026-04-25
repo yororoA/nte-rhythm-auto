@@ -1,0 +1,14 @@
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+release/
+debug_frames/
+*.log
+.idea/
+.vscode/
+*.local.yaml

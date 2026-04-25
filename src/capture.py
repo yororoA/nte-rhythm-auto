@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 _MIN_BRIGHT = 4.0  # 均值低于此视为无效/黑屏，继续尝试下一种截法
 _WGC_GRABBER: "_WgcWindowGrabber | None" = None
+_WGC_LOCK = threading.Lock()
 
 
 def grab_bgr(left: int, top: int, width: int, height: int) -> "NDArray[np.uint8]":
@@ -27,7 +28,13 @@ def grab_bgr(left: int, top: int, width: int, height: int) -> "NDArray[np.uint8]
     使用 mss 截取 **屏幕** 矩形 [left, top, left+width, top+height)。
     若有其它窗口叠在游戏上，会截到叠层内容。
     """
-    import mss
+    try:
+        import mss
+    except ImportError as e:
+        raise RuntimeError(
+            "未安装 mss（mss 截图依赖）。请 pip install mss，"
+            "或将 configs/default.yaml 的 capture.method 改回 wgc。"
+        ) from e
 
     if width <= 0 or height <= 0:
         raise ValueError(f"无效尺寸: {width}x{height}")
@@ -141,22 +148,28 @@ class _WgcWindowGrabber:
 
 def grab_bgr_wgc_client(hwnd: int, timeout_sec: float = 1.0) -> "NDArray[np.uint8]":
     global _WGC_GRABBER
-    if _WGC_GRABBER is None or _WGC_GRABBER.hwnd != int(hwnd):
-        if _WGC_GRABBER is not None:
-            _WGC_GRABBER.stop()
-        _WGC_GRABBER = _WgcWindowGrabber(hwnd)
-    return _WGC_GRABBER.grab(timeout_sec)
+    with _WGC_LOCK:
+        if _WGC_GRABBER is None or _WGC_GRABBER.hwnd != int(hwnd):
+            if _WGC_GRABBER is not None:
+                try:
+                    _WGC_GRABBER.stop()
+                except Exception:
+                    pass
+            _WGC_GRABBER = _WgcWindowGrabber(hwnd)
+        grabber = _WGC_GRABBER
+    return grabber.grab(timeout_sec)
 
 
 def stop_wgc_grabber() -> None:
     """主循环退出时调用，避免 WGC 后台线程残留。"""
     global _WGC_GRABBER
-    if _WGC_GRABBER is not None:
-        try:
-            _WGC_GRABBER.stop()
-        except Exception:
-            pass
-        _WGC_GRABBER = None
+    with _WGC_LOCK:
+        if _WGC_GRABBER is not None:
+            try:
+                _WGC_GRABBER.stop()
+            except Exception:
+                pass
+            _WGC_GRABBER = None
 
 
 def _bitblt_client_copy(

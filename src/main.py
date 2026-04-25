@@ -69,7 +69,7 @@ def _draw_overlay(
 
 def run_loop(
     args: argparse.Namespace,
-    cfg: dict,
+    cfg: dict[str, Any],
     *,
     stop_event: threading.Event | None = None,
     status_callback: Callable[[dict[str, Any]], None] | None = None,
@@ -89,15 +89,32 @@ def run_loop(
         logger.info("截图方式: win32（GDI 窗口截图；异环/UE 场景可能吃遮挡）")
 
     info = None
+    waiting_started = time.perf_counter()
+    waiting_warned_long = False
+    long_wait_threshold_sec = 30.0
     while info is None:
         if stop_event is not None and stop_event.is_set():
             return 1
         info = find_unreal_game_window(exe_name=exe, class_name=cls)
         if not info:
             if wait_for_window:
+                elapsed = time.perf_counter() - waiting_started
                 if status_callback:
-                    status_callback({"waiting": True})
-                logger.warning("未找到游戏窗口，0.5s 后重试…")
+                    status_callback({"waiting": True, "waiting_sec": elapsed})
+                if not waiting_warned_long and elapsed >= long_wait_threshold_sec:
+                    waiting_warned_long = True
+                    msg = (
+                        f"已等待 {int(elapsed)} 秒仍未找到游戏窗口。请确认：\n"
+                        f"  1) 异环 ({exe}) 已启动并完成登录；\n"
+                        "  2) 游戏使用「无边框窗口」模式；\n"
+                        "  3) 工具与游戏运行在同一台 Windows 用户下。\n"
+                        "工具会继续自动重试。"
+                    )
+                    logger.warning(msg)
+                    if status_callback:
+                        status_callback({"waiting": True, "waiting_sec": elapsed, "long_wait_hint": msg})
+                else:
+                    logger.warning("未找到游戏窗口，0.5s 后重试…（已等 %.1fs）", elapsed)
                 time.sleep(0.5)
                 continue
             logger.error("未找到游戏窗口，请确认异环已启动。")
@@ -311,7 +328,7 @@ def run_loop(
     return 0
 
 
-def cmd_grab_once(args: argparse.Namespace, cfg: dict) -> int:
+def cmd_grab_once(args: argparse.Namespace, cfg: dict[str, Any]) -> int:
     win_cfg = cfg.get("window") or {}
     info = find_unreal_game_window(
         exe_name=str(win_cfg.get("exe_name", "HTGame.exe")),
@@ -341,7 +358,7 @@ def cmd_grab_once(args: argparse.Namespace, cfg: dict) -> int:
     return 0
 
 
-def cmd_test_image(args: argparse.Namespace, cfg: dict) -> int:
+def cmd_test_image(args: argparse.Namespace, cfg: dict[str, Any]) -> int:
     path = Path(args.image)
     if not path.is_file():
         logger.error("文件不存在: %s", path)

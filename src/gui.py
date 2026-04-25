@@ -8,11 +8,46 @@ import tkinter as tk
 from argparse import Namespace
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
+from typing import Any
 
 from src.config_loader import load_config
 from src.main import _setup_logging, run_loop
 
 logger = logging.getLogger(__name__)
+
+
+_DISCLAIMER_TEXT = (
+    "本工具通过截图识别 + 模拟按键自动操作异环（HTGame.exe）超强音玩法。\n\n"
+    "此类自动化通常违反游戏用户协议，存在账号封禁、警告等后果，已有同类项目被官方点名先例。\n\n"
+    "本项目仅作为计算机视觉与 Windows 自动化技术的学习项目，不保证可用性、不提供任何商业支持。\n"
+    "使用产生的一切后果（账号、设备、数据等）由你自行承担，作者与贡献者不对此负责。\n\n"
+    "点击「是」表示你已阅读并同意以上条款；点击「否」将关闭本工具。"
+)
+
+
+def _disclaimer_marker_path() -> Path:
+    base = Path.home() / ".nte-rhythm-auto"
+    base.mkdir(parents=True, exist_ok=True)
+    return base / "disclaimer_accepted"
+
+
+def confirm_disclaimer(parent: tk.Misc | None = None) -> bool:
+    marker = _disclaimer_marker_path()
+    if marker.is_file():
+        return True
+    accepted = messagebox.askyesno(
+        title="使用须知 / 风险声明",
+        message=_DISCLAIMER_TEXT,
+        icon=messagebox.WARNING,
+        default=messagebox.NO,
+        parent=parent,
+    )
+    if accepted:
+        try:
+            marker.write_text("accepted", encoding="utf-8")
+        except OSError:
+            pass
+    return accepted
 
 
 class RhythmAutoGUI:
@@ -123,7 +158,7 @@ class RhythmAutoGUI:
             v = default
         return max(min_v, min(v, max_v))
 
-    def _apply_runtime_overrides(self, cfg: dict) -> None:
+    def _apply_runtime_overrides(self, cfg: dict[str, Any]) -> None:
         keys_cfg = cfg.setdefault("keys", {})
         keys_cfg["mode"] = "foreground"
         keys_cfg["press_delay_sec"] = self._parse_sec(self.var_press_delay_sec, 0.0, 0.0, 0.2)
@@ -180,7 +215,7 @@ class RhythmAutoGUI:
         self._worker = threading.Thread(target=worker, name="nte-rhythm-worker", daemon=True)
         self._worker.start()
 
-    def _schedule_status(self, data: dict) -> None:
+    def _schedule_status(self, data: dict[str, Any]) -> None:
         def apply() -> None:
             self._apply_status(data)
 
@@ -189,9 +224,17 @@ class RhythmAutoGUI:
         except tk.TclError:
             pass
 
-    def _apply_status(self, data: dict) -> None:
+    def _apply_status(self, data: dict[str, Any]) -> None:
         if data.get("waiting"):
-            self.var_status.set("等待游戏窗口…请启动异环（HTGame.exe）。")
+            elapsed = data.get("waiting_sec")
+            hint = data.get("long_wait_hint")
+            if hint:
+                self.var_status.set(hint)
+                return
+            base = "等待游戏窗口…请启动异环（HTGame.exe）。"
+            if isinstance(elapsed, (int, float)) and elapsed >= 1:
+                base += f"\n已等待 {int(elapsed)} 秒，仍在自动重试。"
+            self.var_status.set(base)
             return
         if err := data.get("error"):
             self.var_status.set(f"错误: {err}")
@@ -247,5 +290,13 @@ class RhythmAutoGUI:
 
 def run_gui(default_config: Path) -> int:
     _setup_logging(debug=False)
+    consent_root = tk.Tk()
+    consent_root.withdraw()
+    try:
+        accepted = confirm_disclaimer(consent_root)
+    finally:
+        consent_root.destroy()
+    if not accepted:
+        return 1
     app = RhythmAutoGUI(default_config)
     return app.run()

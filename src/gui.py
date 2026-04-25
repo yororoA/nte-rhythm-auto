@@ -30,10 +30,9 @@ class RhythmAutoGUI:
         self.var_debug = tk.BooleanVar(value=False)
         self.var_show = tk.BooleanVar(value=False)
         self.var_debug_interval = tk.StringVar(value="0.5")
-        self.var_press_delay_ms = tk.StringVar(value="0")
-        self.var_key_hold_ms = tk.StringVar(value="10")
-        self.var_target_fps = tk.StringVar(value="90")
-        self.var_input_mode = tk.StringVar(value="foreground")
+        self.var_press_delay_sec = tk.StringVar(value="0.000")
+        self.var_key_hold_sec = tk.StringVar(value="0.010")
+        self.var_capture_interval_sec = tk.StringVar(value="0.011")
         self.var_status = tk.StringVar(value="就绪。请先启动异环，再点「开始」。")
 
         self._build()
@@ -44,16 +43,22 @@ class RhythmAutoGUI:
             self.root.call("ttk::style", "theme", "use", "clam")
         except tk.TclError:
             pass
-        self.root.minsize(720, 520)
+        self.root.minsize(720, 460)
         frm = ttk.Frame(self.root, padding=10)
         frm.pack(fill=tk.BOTH, expand=True)
 
         title = ttk.Label(frm, text="NTE Rhythm Auto", font=("Segoe UI", 16, "bold"))
         title.grid(row=0, column=0, columnspan=3, sticky=tk.W, **pad)
-        note = (
-            "推荐：游戏 1280x720（16:9）+ 30 FPS；截图走 WGC；默认前台按键，请保持游戏窗口在前台。"
+        warning = (
+            "1. 准确率只能达到 80-90%，达不到 100%。\n"
+            "2. 测试用的是 1280x720p、30 FPS。\n"
+            "3. 确保使用管理员权限打开。\n"
+            "4. 默认值如果没什么问题不需要调整。\n"
+            "5. 保持游戏在前台。"
         )
-        ttk.Label(frm, text=note, wraplength=660, justify=tk.LEFT).grid(row=1, column=0, columnspan=3, sticky=tk.W, **pad)
+        tk.Label(frm, text=warning, wraplength=660, justify=tk.LEFT, fg="#c00000").grid(
+            row=1, column=0, columnspan=3, sticky=tk.W, **pad
+        )
 
         config_box = ttk.LabelFrame(frm, text="配置")
         config_box.grid(row=2, column=0, columnspan=3, sticky=tk.EW, **pad)
@@ -65,49 +70,39 @@ class RhythmAutoGUI:
 
         timing_box = ttk.LabelFrame(frm, text="时序 / 设备差异")
         timing_box.grid(row=3, column=0, columnspan=3, sticky=tk.EW, **pad)
-        ttk.Label(timing_box, text="按键延迟 ms").grid(row=0, column=0, sticky=tk.W, **pad)
-        ttk.Entry(timing_box, textvariable=self.var_press_delay_ms, width=8).grid(row=0, column=1, sticky=tk.W, **pad)
-        ttk.Label(timing_box, text="按键保持 ms").grid(row=0, column=2, sticky=tk.W, **pad)
-        ttk.Entry(timing_box, textvariable=self.var_key_hold_ms, width=8).grid(row=0, column=3, sticky=tk.W, **pad)
-        ttk.Label(timing_box, text="目标 FPS").grid(row=0, column=4, sticky=tk.W, **pad)
-        ttk.Entry(timing_box, textvariable=self.var_target_fps, width=8).grid(row=0, column=5, sticky=tk.W, **pad)
-        ttk.Label(timing_box, text="输入模式").grid(row=1, column=0, sticky=tk.W, **pad)
-        mode = ttk.Combobox(timing_box, textvariable=self.var_input_mode, values=("foreground", "background"), width=12, state="readonly")
-        mode.grid(row=1, column=1, sticky=tk.W, **pad)
+        ttk.Label(timing_box, text="按键延迟 s").grid(row=0, column=0, sticky=tk.W, **pad)
+        ttk.Entry(timing_box, textvariable=self.var_press_delay_sec, width=8).grid(row=0, column=1, sticky=tk.W, **pad)
+        ttk.Label(timing_box, text="按键保持 s").grid(row=0, column=2, sticky=tk.W, **pad)
+        ttk.Entry(timing_box, textvariable=self.var_key_hold_sec, width=8).grid(row=0, column=3, sticky=tk.W, **pad)
+        ttk.Label(timing_box, text="截图间隔 s").grid(row=0, column=4, sticky=tk.W, **pad)
+        ttk.Entry(timing_box, textvariable=self.var_capture_interval_sec, width=8).grid(row=0, column=5, sticky=tk.W, **pad)
         ttk.Label(
             timing_box,
-            text="按早：增加延迟；按晚：减少延迟或下移判定线。后台模式需要管理员且不保证异环会吃。",
+            text=(
+                "按键延迟：识别到音符后等待多久再按，按早就加大，按晚就减小。\n"
+                "按键保持：每次按键按住多久，游戏不吃键可略加大，太大会影响连续键。\n"
+                "截图间隔：程序每隔多久截图/识别一次，不是游戏 FPS；数值越小越不易漏但更吃性能。默认值没问题就不要调整。"
+            ),
             wraplength=620,
             justify=tk.LEFT,
-        ).grid(row=2, column=0, columnspan=6, sticky=tk.W, **pad)
-
-        debug_box = ttk.LabelFrame(frm, text="调试")
-        debug_box.grid(row=4, column=0, columnspan=3, sticky=tk.EW, **pad)
-        ttk.Checkbutton(debug_box, text="定期保存叠加图到 debug_frames/", variable=self.var_debug).grid(
-            row=0, column=0, columnspan=2, sticky=tk.W, **pad
-        )
-        ttk.Checkbutton(debug_box, text="显示 OpenCV 预览窗口", variable=self.var_show).grid(
-            row=1, column=0, columnspan=2, sticky=tk.W, **pad
-        )
-        ttk.Label(debug_box, text="写盘间隔(秒)").grid(row=0, column=2, sticky=tk.W, **pad)
-        ttk.Entry(debug_box, textvariable=self.var_debug_interval, width=6).grid(row=0, column=3, sticky=tk.W, **pad)
+        ).grid(row=1, column=0, columnspan=6, sticky=tk.W, **pad)
 
         btn_row = ttk.Frame(frm)
-        btn_row.grid(row=5, column=0, columnspan=3, pady=12)
+        btn_row.grid(row=4, column=0, columnspan=3, pady=12)
         self.btn_start = ttk.Button(btn_row, text="开始", command=self._start)
         self.btn_start.pack(side=tk.LEFT, padx=6)
         self.btn_stop = ttk.Button(btn_row, text="停止", command=self._stop_worker, state=tk.DISABLED)
         self.btn_stop.pack(side=tk.LEFT, padx=6)
 
         status_box = ttk.LabelFrame(frm, text="状态")
-        status_box.grid(row=6, column=0, columnspan=3, sticky=tk.NSEW, **pad)
+        status_box.grid(row=5, column=0, columnspan=3, sticky=tk.NSEW, **pad)
         ttk.Label(status_box, textvariable=self.var_status, wraplength=660, justify=tk.LEFT).pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
-        ttk.Label(frm, text="提示：不同设备主要调“按键延迟 ms / 按键保持 ms / 目标 FPS”。", foreground="#666").grid(
-            row=7, column=0, columnspan=3, sticky=tk.W, **pad
+        ttk.Label(frm, text="提示：不同设备主要调“按键延迟 s / 按键保持 s / 截图间隔 s”。", foreground="#666").grid(
+            row=6, column=0, columnspan=3, sticky=tk.W, **pad
         )
 
         frm.columnconfigure(1, weight=1)
-        frm.rowconfigure(6, weight=1)
+        frm.rowconfigure(5, weight=1)
 
     def _browse_config(self) -> None:
         p = filedialog.askopenfilename(
@@ -124,12 +119,12 @@ class RhythmAutoGUI:
         except ValueError:
             return 0.5
 
-    def _parse_ms(self, var: tk.StringVar, default_ms: float, min_ms: float, max_ms: float) -> float:
+    def _parse_sec(self, var: tk.StringVar, default_sec: float, min_sec: float, max_sec: float) -> float:
         try:
             v = float(var.get().strip())
         except ValueError:
-            v = default_ms
-        return max(min_ms, min(v, max_ms)) / 1000.0
+            v = default_sec
+        return max(min_sec, min(v, max_sec))
 
     def _parse_int(self, var: tk.StringVar, default: int, min_v: int, max_v: int) -> int:
         try:
@@ -140,11 +135,12 @@ class RhythmAutoGUI:
 
     def _apply_runtime_overrides(self, cfg: dict) -> None:
         keys_cfg = cfg.setdefault("keys", {})
-        keys_cfg["mode"] = self.var_input_mode.get().strip() or "foreground"
-        keys_cfg["press_delay_sec"] = self._parse_ms(self.var_press_delay_ms, 0, 0, 200)
-        keys_cfg["key_hold_sec"] = self._parse_ms(self.var_key_hold_ms, 10, 1, 100)
+        keys_cfg["mode"] = "foreground"
+        keys_cfg["press_delay_sec"] = self._parse_sec(self.var_press_delay_sec, 0.0, 0.0, 0.2)
+        keys_cfg["key_hold_sec"] = self._parse_sec(self.var_key_hold_sec, 0.01, 0.001, 0.1)
         run_cfg = cfg.setdefault("run", {})
-        run_cfg["target_fps"] = self._parse_int(self.var_target_fps, 90, 30, 240)
+        interval_sec = self._parse_sec(self.var_capture_interval_sec, 0.011, 0.004, 0.033)
+        run_cfg["target_fps"] = max(1, int(round(1 / interval_sec)))
 
     def _start(self) -> None:
         if self._worker is not None and self._worker.is_alive():
@@ -165,8 +161,8 @@ class RhythmAutoGUI:
 
         self._stop.clear()
         args = Namespace(
-            debug=bool(self.var_debug.get()),
-            show=bool(self.var_show.get()),
+            debug=False,
+            show=False,
             debug_interval=self._parse_debug_interval(),
         )
 

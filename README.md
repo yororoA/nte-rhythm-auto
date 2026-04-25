@@ -1,13 +1,12 @@
 # nte-rhythm-auto
 
-异环（Neverness to Everness）PC 版四键节奏小游戏的原型辅助：通过**窗口截图 + OpenCV HSV 检测**判定线附近的音符像素，并在触发时模拟按下 **D / F / J / K**（可在配置中修改）。
+异环（Neverness to Everness）**超强音自动点击项目**：通过**窗口截图 + OpenCV HSV 检测**判定线附近的音符像素，并在触发时模拟按下 **D / F / J / K**（可在配置中修改）。
 
 > **风险说明**：第三方自动化可能违反游戏用户协议，存在封号等后果。本项目仅供学习计算机视觉与自动化接口，请自行承担使用风险。
 
 ## 推荐运行设置
 
 - Windows 10/11
-- Python 3.10+（源码运行）
 - 游戏进程名通常为 `HTGame.exe`，窗口类名 `UnrealWindow`（与 [ok-nte](https://github.com/BnanZ0/ok-nte) 一致）
 - 推荐游戏设置：**1280×720（16:9）+ 30 FPS**
 - 分辨率可以换，但请保持 **16:9**；检测参数已尽量按比例换算，非 16:9 需要重新校准轨道
@@ -15,7 +14,18 @@
 - 当前默认使用 **前台按键**，运行时请让游戏窗口保持前台焦点
 - 若尝试后台 HWND 按键，请用**管理员权限**运行终端；异环/UE 可能仍不吃普通 `WM_KEYDOWN` 消息
 
-## 安装
+## 使用者下载
+
+不需要安装 Python。
+
+1. 打开 [GitHub Release 下载页](https://github.com/Gloaming02/nte-rhythm-auto/releases/latest)。
+2. 下载 `nte-rhythm-auto-win64.zip`。
+3. 解压 zip。
+4. 右键 `nte-rhythm-auto.exe`，选择 **以管理员身份运行**。
+5. 启动异环，进入超强音玩法，并保持游戏在前台。
+6. 默认值没问题就不要调整，直接点击工具里的「开始」。
+
+## 开发者安装
 
 ```powershell
 cd E:\nte\nte-rhythm-auto
@@ -49,19 +59,17 @@ pip install -r requirements.txt
 - `lanes.judge_line_y_frac`：判定线纵向位置
 - `hsv_ranges`：每条轨道音符环的大致 HSV 范围，可按 `test-image` 输出图微调
 - `keys.mode`：默认 **`foreground`**（pynput 前台输入）；`background` 为 HWND 消息模式，异环/UE 不一定响应。
-- `keys.press_delay_sec` / `keys.key_hold_sec`：不同设备可调的按键延迟与保持时间；GUI 中以毫秒显示。
+- `keys.press_delay_sec` / `keys.key_hold_sec`：不同设备可调的按键延迟与保持时间；GUI 中以秒显示。
 
-## 用法
+## 开发者用法
 
-**图形界面**（推荐：开始/停止、选配置文件、调试勾选项）：
+**图形界面**：
 
 ```powershell
 python -m src gui
 ```
 
 也可带配置路径：`python -m src gui --config E:\path\to\my.yaml`
-
-若使用 Release exe，双击 `nte-rhythm-auto.exe` 即打开图形界面；建议右键 **以管理员身份运行**，尤其在你想测试后台 HWND 按键时。
 
 **命令行实时运行**（需游戏已启动；默认前台按键，请保持游戏窗口可接收键盘焦点）：
 
@@ -87,16 +95,16 @@ python -m src test-image path\to\screenshot.png --out-vis debug_frames\out.png
 
 1. 推荐先用 **1280×720 + 30 FPS**；程序自身建议 `run.target_fps: 90`。
 2. 先用 `grab-once` 保存一帧，再用 `test-image` 看四条斜框/判定框是否对准鼓与判定线。
-3. 不同电脑可先在 GUI 调 **按键延迟 ms / 按键保持 ms / 目标 FPS**：
-   - 音符普遍按早：增加 `按键延迟 ms`
+3. 不同电脑可先在 GUI 调 **按键延迟 s / 按键保持 s / 截图间隔 s**：
+   - 音符普遍按早：增加 `按键延迟 s`
    - 音符普遍按晚：减少延迟，或下移对应轨道判定线
-   - 偶发漏：提高 `目标 FPS`，例如 90 -> 120
-   - 按键不稳：把 `按键保持 ms` 从 10 调到 15/20
+   - 偶发漏：减少 `截图间隔 s`，例如 0.011 -> 0.008
+   - 按键不稳：把 `按键保持 s` 从 0.010 调到 0.015/0.020
 4. D/J/K 连续同轨音符使用 `component_mode_lanes` 组件识别；若连续音符漏，优先调 `component_same_note_y_frac` 和 `component_history_sec`。
 5. F 轨黄色容易吃到底部静态鼓面，默认不使用组件识别，并通过 `judge_line_y_frac_by_lane` 单独上移判定线。
 6. 光效较强时，可适当提高 `s_min` / `v_min` 或增大 `morph_kernel` 去噪。
 
-## 打包 Release
+## 开发者打包 Release
 
 维护者可用 PyInstaller 打包 GUI exe：
 
@@ -109,7 +117,11 @@ pyinstaller --noconfirm --clean --onefile --windowed `
   run_gui.py
 ```
 
-产物在 `dist\nte-rhythm-auto.exe`。发布到 GitHub Release 时建议同时附上 `configs/default.yaml`，方便用户自行调参。
+产物在 `dist\nte-rhythm-auto.exe`。发布到 GitHub Release 时建议打包 zip，包含：
+
+- `nte-rhythm-auto.exe`
+- `configs/default.yaml`
+- `README.md`
 
 ## 日志说明
 

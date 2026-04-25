@@ -16,40 +16,6 @@ from src.main import _setup_logging, run_loop
 logger = logging.getLogger(__name__)
 
 
-_DISCLAIMER_TEXT = (
-    "本工具通过截图识别 + 模拟按键自动操作异环（HTGame.exe）超强音玩法。\n\n"
-    "此类自动化通常违反游戏用户协议，存在账号封禁、警告等后果，已有同类项目被官方点名先例。\n\n"
-    "本项目仅作为计算机视觉与 Windows 自动化技术的学习项目，不保证可用性、不提供任何商业支持。\n"
-    "使用产生的一切后果（账号、设备、数据等）由你自行承担，作者与贡献者不对此负责。\n\n"
-    "点击「是」表示你已阅读并同意以上条款；点击「否」将关闭本工具。"
-)
-
-
-def _disclaimer_marker_path() -> Path:
-    base = Path.home() / ".nte-rhythm-auto"
-    base.mkdir(parents=True, exist_ok=True)
-    return base / "disclaimer_accepted"
-
-
-def confirm_disclaimer(parent: tk.Misc | None = None) -> bool:
-    marker = _disclaimer_marker_path()
-    if marker.is_file():
-        return True
-    accepted = messagebox.askyesno(
-        title="使用须知 / 风险声明",
-        message=_DISCLAIMER_TEXT,
-        icon=messagebox.WARNING,
-        default=messagebox.NO,
-        parent=parent,
-    )
-    if accepted:
-        try:
-            marker.write_text("accepted", encoding="utf-8")
-        except OSError:
-            pass
-    return accepted
-
-
 class RhythmAutoGUI:
     def __init__(self, default_config: Path) -> None:
         self._default_config = default_config
@@ -290,13 +256,5 @@ class RhythmAutoGUI:
 
 def run_gui(default_config: Path) -> int:
     _setup_logging(debug=False)
-    consent_root = tk.Tk()
-    consent_root.withdraw()
-    try:
-        accepted = confirm_disclaimer(consent_root)
-    finally:
-        consent_root.destroy()
-    if not accepted:
-        return 1
     app = RhythmAutoGUI(default_config)
     return app.run()

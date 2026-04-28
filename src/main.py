@@ -17,7 +17,7 @@ import numpy as np
 from src.capture import capture_runtime_status, grab_game_client_bgr, stop_wgc_grabber
 from src.config_loader import default_config_path, load_config
 from src.detector import RhythmDetector
-from src.keys import KeySender
+from src.keys import AsyncKeyDispatcher, KeySender
 from src.lanes import build_lane_layout, lane_full_roi_slice, lane_roi_quad
 from src.presence import SceneGate
 from src.window import client_rect_screen, find_unreal_game_window, window_rect_screen
@@ -127,6 +127,7 @@ def run_loop(
     keys_cfg = cfg.get("keys") or {}
     mode = str(keys_cfg.get("mode", "foreground")).lower()
     sender = KeySender(cfg, hwnd if mode == "background" else None)
+    dispatcher = AsyncKeyDispatcher(sender)
     if mode == "background":
         sender.maybe_fake_activate()
         dispatch = str(keys_cfg.get("win32_dispatch", "post")).lower()
@@ -241,6 +242,10 @@ def run_loop(
 
             triggers, masks, pixels = detector.analyze(frame, layout)
 
+            fire_times = dispatcher.drain_fire_times()
+            if fire_times:
+                detector.update_fire_times(fire_times)
+
             log_now = time.perf_counter()
             if px_log_iv > 0 and (log_now - last_px_log) >= px_log_iv:
                 last_px_log = log_now
@@ -263,25 +268,29 @@ def run_loop(
                         "进入四键节奏页后会自动开始；若已进入仍不按键，可调 configs/default.yaml -> presence。"
                     )
                     suppress_hint_logged = True
+                dispatcher.clear()
             elif armed:
                 suppress_hint_logged = False
 
-            for i, t in enumerate(triggers):
-                if t and armed:
-                    meta = hsv_ranges[i] if i < len(hsv_ranges) else {}
-                    range_name = meta.get("name", "?")
-                    key_name = sender.lane_key_name(i)
-                    logger.info(
-                        "识别触发 -> 按键 %s | 轨道=%d | HSV配置名=%s | 判定带像素=%d (阈值=%d) | 输入模式=%s",
-                        key_name.upper(),
-                        i + 1,
-                        range_name,
-                        pixels[i],
-                        detector.min_pixels_for_lane(i),
-                        mode,
-                    )
-                    sender.press_lane(i)
-                    press_counts[i] += 1
+            triggered = [i for i, t in enumerate(triggers) if t and armed]
+            for i in triggered:
+                meta = hsv_ranges[i] if i < len(hsv_ranges) else {}
+                range_name = meta.get("name", "?")
+                key_name = sender.lane_key_name(i)
+                logger.info(
+                    "识别触发 -> 按键 %s | 轨道=%d | HSV配置名=%s | 判定带像素=%d (阈值=%d) | 输入模式=%s",
+                    key_name.upper(),
+                    i + 1,
+                    range_name,
+                    pixels[i],
+                    detector.min_pixels_for_lane(i),
+                    mode,
+                )
+                press_counts[i] += 1
+            if triggered:
+                target_time = time.perf_counter() + sender._delay
+                detector.reserve_fire_times(triggered, target_time)
+                dispatcher.dispatch(triggered, target_time)
 
             frame_elapsed = time.perf_counter() - t0
             inst_fps = 1.0 / max(frame_elapsed, 1e-6)
@@ -325,6 +334,8 @@ def run_loop(
     except KeyboardInterrupt:
         logger.info("已停止。")
     finally:
+        dispatcher.stop()
+        dispatcher.join()
         stop_wgc_grabber()
         if args.show:
             try:

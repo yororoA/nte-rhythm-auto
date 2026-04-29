@@ -96,25 +96,34 @@ presence:
   dynamic_absdiff_threshold: 12
 
 # 场景状态检测：识别 OTHER / SONG_SELECT / PLAYING / RESULTS 四种游戏界面
+# 子模块模板匹配：将 assets/scene_templates/<kind>/ 下每张图片视为独立子模块（按钮/图标/标签），
+# 在画面中逐一匹配，至少 match_vote_min 个命中则判定为对应场景。
 scene:
-  # "开始演奏"按钮检测区域（选歌界面右下角）
-  start_button_x_frac: 0.855
-  start_button_y_frac: 0.925
-  start_button_half_w_frac: 0.055
-  start_button_half_h_frac: 0.028
-  # 按钮区域 Laplacian 方差下限（有文字/边框纹理即通过）
-  start_button_min_laplace_var: 60
-  # 按钮区域灰度均值下限（排除纯黑区域）
-  start_button_min_mean_gray: 30
   # 状态切换确认帧数（连续 N 帧检测到同一目标状态才切换，防抖）
   state_confirm_frames: 2
-  # 场景模板匹配（需要准备 assets/scene_templates 目录）
-  template_match_enabled: false
-  # song_select/results 模板匹配阈值（0~1）
+  # 场景子模块模板匹配开关
+  # 关闭时仅使用 Laplacian 鼓位检测判断 PLAYING 状态，性能开销极低
+  # 开启时加载 assets/scene_templates/ 下对应目录的子模块图片进行匹配
+  template_match_enabled: true
+  # 演奏中稳定状态跳过模板匹配的帧数（0=每帧都匹配；>0 时 PLAYING+armed 状态下每 N 帧才做一次模板匹配）
+  match_skip_when_stable: 5
+  # 各场景子模块匹配阈值（0~1，越高越严格）
   song_select_match_threshold: 0.75
   results_match_threshold: 0.75
+  playing_match_threshold: 0.75
+  # 至少多少个子模块命中才判定为该场景（若模板不足，自动降到模板数量）
+  match_vote_min: 2
+  # 各场景匹配 ROI 限定（可选）：[x0, y0, x1, y1]，0~1 归一化坐标；留空表示整帧
+  song_select_roi:
+  results_roi:
+  playing_roi:
+  # 模糊核大小（奇数）；<3 表示不模糊
+  match_blur_ksize: 5
+  # 下采样比例（0.1~1.0）；1.0 表示不缩小
+  match_downscale: 0.5
 
 # 自动选歌：进入选歌界面后自动搜索目标歌曲并点击"开始演奏"
+# 「开始演奏」按钮通过模板匹配 assets/scene_templates/song_select/start.png 定位
 song_select:
   enabled: false
   # 目标歌曲名称（对应 assets/song_templates/ 目录下的模板图片文件名，不含扩展名）
@@ -126,12 +135,22 @@ song_select:
   scroll_delta: -3
   # 最大滚动尝试次数（超过后放弃选歌）
   max_scroll_attempts: 30
-  # 模板匹配置信度阈值（0~1，越高越严格）
+  # 歌曲模板匹配置信度阈值（0~1，越高越严格）
   match_threshold: 0.75
+  # 「开始演奏」按钮模板匹配阈值
+  start_match_threshold: 0.75
   # 点击歌曲后的等待秒数（等待选中动画）
   click_delay_sec: 0.5
   # 点击"开始演奏"后的等待秒数
   start_delay_sec: 0.8
+
+# 自动连打：结算界面自动发送 ESC 返回选歌，循环指定次数（需开启自动选歌）
+auto_repeat:
+  enabled: false
+  # 连打次数（选曲→演奏→结算 为一次）
+  count: 5
+  # 检测到结算界面后等待多少秒再发送 ESC（等待结算动画展示）
+  dismiss_delay_sec: 0.8
 
 detection:
   # 启用轨道：D/F/J/K
@@ -145,7 +164,7 @@ detection:
   component_history_sec: 0.25
   # 判定带内掩膜像素数超过此值认为有音符
   min_pixels_per_lane: 200
-  # 按轨单独阈值；F 轨按 J 轨同样逻辑处理，避免黄色音符临界时漏检
+  # 按轨单独阈值；F 轨黄色易吃静态鼓面，保持普通判定带逻辑
   min_pixels_by_lane: [200, 200, 200, 200]
   # 同一条轨道触发后的冷却（秒）
   cooldown_sec: 0.12

@@ -1,4 +1,4 @@
-"""自动选歌：在选歌界面通过模板匹配找到目标歌曲并点击选中，再点击"开始演奏"。"""
+"""自动选歌：在选歌界面通过模板匹配找到目标歌曲并点击选中，再匹配「开始演奏」按钮点击。"""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import cv2
 import numpy as np
 from numpy.typing import NDArray
 
-from src.assets import asset_path, list_song_templates
+from src.assets import asset_path, list_scene_templates, list_song_templates
 from src.lanes import LaneLayout
 from src.mouse import MouseClicker
 
@@ -39,12 +39,10 @@ class SongSelector:
         self._match_threshold = float(sc.get("match_threshold", 0.75))
         self._click_delay = float(sc.get("click_delay_sec", 0.5))
         self._start_delay = float(sc.get("start_delay_sec", 0.8))
-
-        scene_cfg = cfg.get("scene") or {}
-        self._start_btn_x_frac = float(scene_cfg.get("start_button_x_frac", 0.855))
-        self._start_btn_y_frac = float(scene_cfg.get("start_button_y_frac", 0.855))
+        self._start_match_threshold = float(sc.get("start_match_threshold", 0.75))
 
         self._template: NDArray[np.uint8] | None = None
+        self._start_template: NDArray[np.uint8] | None = None
         self._state: str = _SEL_IDLE
         self._scroll_attempts: int = 0
         self._last_action_time: float = 0.0
@@ -55,6 +53,21 @@ class SongSelector:
         elif self.enabled and not self._song_name:
             logger.warning("自动选歌已启用但未指定歌曲名称")
             self.enabled = False
+
+        if self.enabled:
+            self._load_start_template()
+
+    def _load_start_template(self) -> None:
+        templates = list_scene_templates("song_select")
+        for stem, path in templates:
+            if stem == "start":
+                img = self._read_image(path)
+                if img is not None:
+                    self._start_template = img
+                    th, tw = img.shape[:2]
+                    logger.info("已加载「开始演奏」按钮模板：%s (%dx%d)", path.name, tw, th)
+                    return
+        logger.warning("未找到「开始演奏」按钮模板：start.png（请放入 assets/scene_templates/song_select/）")
 
     def _load_template_by_name(self, name: str) -> bool:
         templates = list_song_templates()
@@ -70,8 +83,7 @@ class SongSelector:
             logger.warning("歌曲模板文件不存在: %s", p)
             self.enabled = False
             return False
-        img_bytes = np.fromfile(str(p), dtype=np.uint8)
-        img = cv2.imdecode(img_bytes, cv2.IMREAD_COLOR)
+        img = self._read_image(p)
         if img is None:
             logger.warning("无法读取歌曲模板图片： %s", p)
             self.enabled = False
@@ -80,6 +92,13 @@ class SongSelector:
         th, tw = img.shape[:2]
         logger.info("已加载歌曲模板： %s (%dx%d)", p.name, tw, th)
         return True
+
+    def _read_image(self, p: Path) -> NDArray[np.uint8] | None:
+        img = cv2.imread(str(p), cv2.IMREAD_COLOR)
+        if img is None:
+            img_bytes = np.fromfile(str(p), dtype=np.uint8)
+            img = cv2.imdecode(img_bytes, cv2.IMREAD_COLOR)
+        return img
 
     def select_song(self, name: str) -> bool:
         self._song_name = name
@@ -122,7 +141,7 @@ class SongSelector:
             self._scroll_attempts = 0
 
         if self._state == _SEL_SEARCHING:
-            match = self._find_template(frame_bgr)
+            match = self._find_template(frame_bgr, self._template, self._match_threshold)
             if match is not None:
                 self._match_loc = match
                 self._state = _SEL_CLICKING_SONG
@@ -168,12 +187,19 @@ class SongSelector:
         if self._state == _SEL_CLICKING_START:
             if now - self._last_action_time < self._start_delay:
                 return {"state": self._state, "action": "waiting"}
-            bx = int(self._start_btn_x_frac * w)
-            by = int(self._start_btn_y_frac * h)
-            mouse.click(bx, by, client_origin=client_origin)
-            self._last_action_time = now
-            self._state = _SEL_WAITING
-            logger.info("已点击「开始演奏」按钮 (%d,%d)", bx, by)
+            if self._start_template is not None:
+                start_loc = self._find_template(frame_bgr, self._start_template, self._start_match_threshold)
+            else:
+                start_loc = None
+            if start_loc is not None:
+                sx, sy = start_loc
+                mouse.click(sx, sy, client_origin=client_origin)
+                self._last_action_time = now
+                self._state = _SEL_WAITING
+                logger.info("已点击「开始演奏」按钮 (模板匹配位置 %d,%d)", sx, sy)
+            else:
+                logger.warning("未匹配到「开始演奏」按钮")
+                self._state = _SEL_FAILED
             return {"state": self._state, "action": "click_start"}
 
         if self._state == _SEL_WAITING:
@@ -188,17 +214,18 @@ class SongSelector:
         return {"state": self._state, "action": "unknown"}
 
     def _find_template(
-        self, frame_bgr: NDArray[np.uint8]
+        self,
+        frame_bgr: NDArray[np.uint8],
+        tpl: NDArray[np.uint8],
+        threshold: float,
     ) -> tuple[int, int] | None:
-        if self._template is None:
-            return None
-        th, tw = self._template.shape[:2]
+        th, tw = tpl.shape[:2]
         fh, fw = frame_bgr.shape[:2]
         if th > fh or tw > fw:
             return None
-        result = cv2.matchTemplate(frame_bgr, self._template, cv2.TM_CCOEFF_NORMED)
+        result = cv2.matchTemplate(frame_bgr, tpl, cv2.TM_CCOEFF_NORMED)
         _, max_val, _, max_loc = cv2.minMaxLoc(result)
-        if max_val >= self._match_threshold:
+        if max_val >= threshold:
             cx = max_loc[0] + tw // 2
             cy = max_loc[1] + th // 2
             return cx, cy

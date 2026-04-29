@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 _LANES: tuple[str, str, str, str] = ("d", "f", "j", "k")
 _VK: dict[str, int] = {"d": 0x44, "f": 0x46, "j": 0x4A, "k": 0x4B}
+_VK_ESCAPE = 0x1B
 
 
 def _lparam_keydown(vk: int) -> int:
@@ -119,6 +120,34 @@ class KeySender:
             self._hold,
             self._mode,
         )
+
+    def send_escape(self) -> None:
+        vk = _VK_ESCAPE
+        if self._mode == "background":
+            if not self._hwnd:
+                logger.error("后台模式需要有效 hwnd")
+                return
+            l_down = _lparam_keydown(vk)
+            l_up = _lparam_keyup(vk)
+            try:
+                if self._win32_dispatch == "send":
+                    win32gui.SendMessage(self._hwnd, win32con.WM_KEYDOWN, vk, l_down)
+                    time.sleep(self._hold)
+                    win32gui.SendMessage(self._hwnd, win32con.WM_KEYUP, vk, l_up)
+                else:
+                    win32gui.PostMessage(self._hwnd, win32con.WM_KEYDOWN, vk, l_down)
+                    time.sleep(self._hold)
+                    win32gui.PostMessage(self._hwnd, win32con.WM_KEYUP, vk, l_up)
+            except Exception as e:
+                logger.error("后台 ESC 失败: %s", e)
+            return
+        try:
+            kb = self._ensure_kb()
+            kb.press("esc")
+            time.sleep(self._hold)
+            kb.release("esc")
+        except Exception as e:
+            logger.error("pynput ESC 失败: %s", e)
 
 
 class _BatchItem:

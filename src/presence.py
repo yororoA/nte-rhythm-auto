@@ -2,17 +2,18 @@
 游戏场景状态检测：识别 OTHER / SONG_SELECT / PLAYING / RESULTS 四种状态。
 
 原理：
-1. 模板匹配：用 cv2.matchTemplate 比对选歌/结算/演奏界面的特征模板图片，
-    精确识别 SONG_SELECT / RESULTS / PLAYING。
+1. 子模块模板匹配（可选）：将 assets/scene_templates/<kind>/ 下的每张图片视为
+    一个独立子模块（如按钮、图标、标签），用 cv2.matchTemplate 在画面中逐一匹配。
+    至少 match_vote_min 个子模块命中则判定为对应场景。需 scene.template_match_enabled=true。
 2. Laplacian 方差检测：在四条轨道对应的画面底部各取一块正方形灰度图，
     计算 Laplacian 方差，作为 PLAYING 的兜底识别。
 
 状态分类逻辑（优先级从高到低）：
-  song_select 模板匹配成功            → SONG_SELECT
-  results 模板匹配成功                 → RESULTS
-  playing 模板匹配成功                 → PLAYING
-  四鼓位 Laplacian 方差全部达标         → PLAYING
-  以上都不满足                          → OTHER
+  song_select 子模块匹配成功            → SONG_SELECT
+  results 子模块匹配成功                 → RESULTS
+  playing 子模块匹配成功                 → PLAYING
+  四鼓位 Laplacian 方差全部达标          → PLAYING
+  以上都不满足                           → OTHER
 """
 
 from __future__ import annotations
@@ -50,13 +51,27 @@ class SceneGate:
         self.disarm_after_bad_frames = max(1, int(p.get("disarm_after_bad_frames", 5)))
 
         sc = cfg.get("scene") or {}
+        self._template_match_enabled = bool(sc.get("template_match_enabled", False))
         self._song_select_thresh = float(sc.get("song_select_match_threshold", 0.75))
         self._results_thresh = float(sc.get("results_match_threshold", 0.75))
         self._playing_thresh = float(sc.get("playing_match_threshold", 0.75))
         self._state_confirm_frames = max(1, int(sc.get("state_confirm_frames", 2)))
-        self._song_select_tpls = self._load_templates("song_select")
-        self._results_tpls = self._load_templates("results")
-        self._playing_tpls = self._load_templates("playing")
+        self._match_blur_ksize = int(sc.get("match_blur_ksize", 3))
+        self._match_downscale = float(sc.get("match_downscale", 1.0))
+        self._match_vote_min = max(1, int(sc.get("match_vote_min", 2)))
+        self._song_select_roi = sc.get("song_select_roi")
+        self._results_roi = sc.get("results_roi")
+        self._playing_roi = sc.get("playing_roi")
+        self._match_skip_when_stable = max(0, int(sc.get("match_skip_when_stable", 5)))
+
+        if self._template_match_enabled:
+            self._song_select_tpls = self._load_and_prepare_templates("song_select")
+            self._results_tpls = self._load_and_prepare_templates("results")
+            self._playing_tpls = self._load_and_prepare_templates("playing")
+        else:
+            self._song_select_tpls = []
+            self._results_tpls = []
+            self._playing_tpls = []
 
         self._state: str = STATE_OTHER
         self._target_state: str = STATE_OTHER
@@ -64,6 +79,7 @@ class SceneGate:
         self._armed = False
         self._good_streak = 0
         self._bad_streak = 0
+        self._stable_frame_count = 0
 
     @property
     def state(self) -> str:
@@ -90,15 +106,47 @@ class SceneGate:
             }
 
         per_ok, lap_vars, mean_grays = self._measure_patches(frame_bgr, layout)
-        ss_ok, ss_val, ss_name = self._match_templates(
-            frame_bgr, self._song_select_tpls, self._song_select_thresh
+
+        skip_tpl = (
+            self._template_match_enabled
+            and self._match_skip_when_stable > 0
+            and self._armed
+            and self._state == STATE_PLAYING
+            and self._stable_frame_count < self._match_skip_when_stable
         )
-        rs_ok, rs_val, rs_name = self._match_templates(
-            frame_bgr, self._results_tpls, self._results_thresh
-        )
-        pl_ok, pl_val, pl_name = self._match_templates(
-            frame_bgr, self._playing_tpls, self._playing_thresh
-        )
+
+        if self._template_match_enabled and not skip_tpl:
+            ss_ok, ss_val, ss_name = self._match_templates(
+                frame_bgr,
+                self._song_select_tpls,
+                self._song_select_thresh,
+                roi_frac=self._song_select_roi,
+            )
+            rs_ok, rs_val, rs_name = self._match_templates(
+                frame_bgr,
+                self._results_tpls,
+                self._results_thresh,
+                roi_frac=self._results_roi,
+            )
+            pl_ok, pl_val, pl_name = self._match_templates(
+                frame_bgr,
+                self._playing_tpls,
+                self._playing_thresh,
+                roi_frac=self._playing_roi,
+            )
+            self._stable_frame_count = 0
+        else:
+            ss_ok = False
+            ss_val = 0.0
+            ss_name = ""
+            rs_ok = False
+            rs_val = 0.0
+            rs_name = ""
+            pl_ok = False
+            pl_val = 0.0
+            pl_name = ""
+            if skip_tpl:
+                self._stable_frame_count += 1
 
         drums_present = all(per_ok)
         if ss_ok:
@@ -166,7 +214,10 @@ class SceneGate:
         }
         return self._state, info
 
-    def _load_templates(self, kind: str) -> list[tuple[str, NDArray[np.uint8]]]:
+    def _load_and_prepare_templates(
+        self,
+        kind: str,
+    ) -> list[tuple[str, NDArray[np.uint8]]]:
         templates: list[tuple[str, NDArray[np.uint8]]] = []
         for name, tpl_path in list_scene_templates(kind):
             img = cv2.imread(str(tpl_path), cv2.IMREAD_COLOR)
@@ -174,13 +225,14 @@ class SceneGate:
                 img_bytes = np.fromfile(str(tpl_path), dtype=np.uint8)
                 img = cv2.imdecode(img_bytes, cv2.IMREAD_COLOR)
             if img is None:
-                logger.warning("无法读取场景模板图片：%s", tpl_path)
+                logger.warning("无法读取场景子模块模板：%s", tpl_path)
                 continue
-            th, tw = img.shape[:2]
-            logger.info("已加载场景模板：%s/%s (%dx%d)", kind, tpl_path.name, tw, th)
-            templates.append((name, img))
+            prepared = self._prepare_match_image(img)
+            th, tw = prepared.shape[:2]
+            logger.info("已加载场景子模块模板：%s/%s (%dx%d)", kind, name, tw, th)
+            templates.append((name, prepared))
         if not templates:
-            logger.debug("未找到场景模板：%s", kind)
+            logger.debug("未找到场景子模块模板：%s", kind)
         return templates
 
     def _match_templates(
@@ -188,22 +240,67 @@ class SceneGate:
         frame_bgr: NDArray[np.uint8],
         templates: list[tuple[str, NDArray[np.uint8]]],
         threshold: float,
+        *,
+        roi_frac: list[float] | tuple[float, float, float, float] | None = None,
     ) -> tuple[bool, float, str]:
         if not templates:
             return False, 0.0, ""
-        fh, fw = frame_bgr.shape[:2]
+        frame_roi = self._crop_roi(frame_bgr, roi_frac)
+        if frame_roi is None:
+            return False, 0.0, ""
+        match_frame = self._prepare_match_image(frame_roi)
+        fh, fw = match_frame.shape[:2]
+
         best_val = 0.0
         best_name = ""
-        for name, template in templates:
-            th, tw = template.shape[:2]
-            if th > fh or tw > fw:
+        vote_count = 0
+        required_votes = min(self._match_vote_min, len(templates))
+
+        for name, tpl in templates:
+            th, tw = tpl.shape[:2]
+            if th > fh or tw > fw or th <= 0 or tw <= 0:
                 continue
-            result = cv2.matchTemplate(frame_bgr, template, cv2.TM_CCOEFF_NORMED)
+            result = cv2.matchTemplate(match_frame, tpl, cv2.TM_CCOEFF_NORMED)
             _, max_val, _, _ = cv2.minMaxLoc(result)
             if max_val > best_val:
                 best_val = float(max_val)
                 best_name = name
-        return best_val >= threshold, best_val, best_name
+            if max_val >= threshold:
+                vote_count += 1
+
+        ok = vote_count >= required_votes
+        return ok, best_val, best_name
+
+    def _prepare_match_image(self, img: NDArray[np.uint8]) -> NDArray[np.uint8]:
+        out = img
+        k = self._match_blur_ksize
+        if k is not None and k >= 3:
+            k = k if k % 2 == 1 else k + 1
+            out = cv2.GaussianBlur(out, (k, k), 0)
+        scale = self._match_downscale
+        if scale is not None and 0.1 <= scale < 1.0:
+            h, w = out.shape[:2]
+            nw = max(1, int(w * scale))
+            nh = max(1, int(h * scale))
+            if nw != w or nh != h:
+                out = cv2.resize(out, (nw, nh), interpolation=cv2.INTER_AREA)
+        return out
+
+    def _crop_roi(
+        self,
+        img: NDArray[np.uint8],
+        roi_frac: list[float] | tuple[float, float, float, float] | None,
+    ) -> NDArray[np.uint8] | None:
+        if not roi_frac or len(roi_frac) != 4:
+            return img
+        h, w = img.shape[:2]
+        x0 = int(max(0.0, min(1.0, float(roi_frac[0]))) * w)
+        y0 = int(max(0.0, min(1.0, float(roi_frac[1]))) * h)
+        x1 = int(max(0.0, min(1.0, float(roi_frac[2]))) * w)
+        y1 = int(max(0.0, min(1.0, float(roi_frac[3]))) * h)
+        if x1 <= x0 or y1 <= y0:
+            return None
+        return img[y0:y1, x0:x1]
 
     def _measure_patches(
         self,

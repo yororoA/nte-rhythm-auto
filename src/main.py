@@ -175,6 +175,17 @@ def run_loop(
     if song_selector.enabled:
         logger.info("已启用自动选歌：进入选歌界面后将自动搜索并选择目标歌曲。")
 
+    ar_cfg = cfg.get("auto_repeat") or {}
+    ar_enabled = bool(ar_cfg.get("enabled", False))
+    ar_total = max(0, int(ar_cfg.get("count", 0)))
+    ar_remaining = ar_total
+    ar_dismiss_delay = float(ar_cfg.get("dismiss_delay_sec", 0.8))
+    ar_dismiss_stage = 0
+    ar_dismiss_start = 0.0
+    ar_completed_count = 0
+    if ar_enabled and ar_total > 0:
+        logger.info("已启用自动连打: 共 %d 次", ar_total)
+
     try:
         while True:
             if stop_event is not None and stop_event.is_set():
@@ -240,15 +251,16 @@ def run_loop(
             state, gate_info = scene_gate.step(frame, layout)
 
             if gate_info.get("state_transitioned"):
-                dyn_ratio = gate_info.get("dynamic_ratio", 0.0)
-                dyn_lane = gate_info.get("per_lane_dynamic", [])
-                btn_ok = gate_info.get("start_button_ok", False)
+                tpl_ss = gate_info.get("song_select_tpl_ok", False)
+                tpl_rs = gate_info.get("results_tpl_ok", False)
+                tpl_pl = gate_info.get("playing_tpl_ok", False)
                 logger.info(
-                    "场景切换 -> %s | 四鼓位通过=%s | 动态率≈%.4f | 开始按钮=%s",
+                    "场景切换 -> %s | 四鼓位通过=%s | 子模块匹配 ss=%s rs=%s pl=%s",
                     state,
                     gate_info.get("per_ok"),
-                    dyn_ratio,
-                    btn_ok,
+                    tpl_ss,
+                    tpl_rs,
+                    tpl_pl,
                 )
 
             if state == STATE_SONG_SELECT and song_selector.enabled:
@@ -263,6 +275,35 @@ def run_loop(
                 sel_info = {"state": "n/a"}
                 if state == STATE_PLAYING:
                     song_selector.reset()
+
+            if ar_enabled and ar_remaining > 0:
+                now_ar = time.perf_counter()
+                if state == STATE_RESULTS:
+                    if ar_dismiss_stage == 0:
+                        ar_dismiss_stage = 1
+                        ar_dismiss_start = now_ar
+                        logger.info(
+                            "自动连打: 检测到结算界面, %.1fs 后退出 (第 %d/%d 次)",
+                            ar_dismiss_delay, ar_completed_count + 1, ar_total,
+                        )
+                    elif ar_dismiss_stage == 1 and now_ar - ar_dismiss_start >= ar_dismiss_delay:
+                        sender.send_escape()
+                        ar_dismiss_stage = 2
+                        ar_dismiss_start = now_ar
+                        logger.info("自动连打: 已发送 ESC")
+                elif ar_dismiss_stage >= 1:
+                    ar_remaining -= 1
+                    ar_completed_count += 1
+                    ar_dismiss_stage = 0
+                    ar_dismiss_start = 0.0
+                    song_selector.reset()
+                    if ar_remaining > 0:
+                        logger.info(
+                            "自动连打: 已回到选歌界面, 剩余 %d 次 (已完成 %d/%d)",
+                            ar_remaining, ar_completed_count, ar_total,
+                        )
+                    else:
+                        logger.info("自动连打完成: 共 %d 次", ar_completed_count)
 
             armed = bool(gate_info.get("armed", state == STATE_PLAYING))
             triggers, masks, pixels = detector.analyze(frame, layout)
@@ -339,12 +380,15 @@ def run_loop(
                         "scene_lap": tuple(
                             round(float(x), 0) for x in gate_info.get("lap_vars", ())
                         ),
-                        "scene_dynamic_ratio": gate_info.get("dynamic_ratio", 0.0),
-                        "scene_is_dynamic": gate_info.get("is_dynamic", True),
-                        "scene_per_lane_dynamic": tuple(gate_info.get("per_lane_dynamic", ())),
-                        "scene_start_btn": gate_info.get("start_button_ok", False),
+                        "scene_tpl_ss_val": gate_info.get("song_select_tpl_val", 0.0),
+                        "scene_tpl_rs_val": gate_info.get("results_tpl_val", 0.0),
+                        "scene_tpl_pl_val": gate_info.get("playing_tpl_val", 0.0),
                         "song_sel_state": sel_info.get("state", "n/a"),
                         "song_sel_action": sel_info.get("action", ""),
+                        "ar_enabled": ar_enabled,
+                        "ar_total": ar_total,
+                        "ar_remaining": ar_remaining,
+                        "ar_completed": ar_completed_count,
                         "capture": capture_runtime_status(),
                     }
                 )

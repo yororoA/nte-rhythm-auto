@@ -143,9 +143,10 @@ class KeySender:
             return
         try:
             kb = self._ensure_kb()
-            kb.press("esc")
+            from pynput.keyboard import Key
+            kb.press(Key.esc)
             time.sleep(self._hold)
-            kb.release("esc")
+            kb.release(Key.esc)
         except Exception as e:
             logger.error("pynput ESC 失败: %s", e)
 

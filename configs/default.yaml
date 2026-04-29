@@ -105,8 +105,8 @@ scene:
   # 关闭时仅使用 Laplacian 鼓位检测判断 PLAYING 状态，性能开销极低
   # 开启时加载 assets/scene_templates/ 下对应目录的子模块图片进行匹配
   template_match_enabled: true
-  # 演奏中稳定状态跳过模板匹配的帧数（0=每帧都匹配；>0 时 PLAYING+armed 状态下每 N 帧仅检查 playing 子模块，其他场景跳过）
-  match_skip_when_stable: 5
+  # 演奏中跳过模板匹配（true=PLAYING+armed 时仅靠 Laplacian 鼓位检测，零模板开销）
+  match_skip_playing: true
   # 各场景子模块匹配阈值（0~1，越高越严格）
   song_select_match_threshold: 0.75
   results_match_threshold: 0.75

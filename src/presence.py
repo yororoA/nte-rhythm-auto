@@ -62,7 +62,7 @@ class SceneGate:
         self._song_select_roi = sc.get("song_select_roi")
         self._results_roi = sc.get("results_roi")
         self._playing_roi = sc.get("playing_roi")
-        self._match_skip_when_stable = max(0, int(sc.get("match_skip_when_stable", 5)))
+        self._match_skip_playing = bool(sc.get("match_skip_playing", True))
 
         if self._template_match_enabled:
             self._song_select_tpls = self._load_and_prepare_templates("song_select")
@@ -79,7 +79,6 @@ class SceneGate:
         self._armed = False
         self._good_streak = 0
         self._bad_streak = 0
-        self._stable_frame_count = 0
 
     @property
     def state(self) -> str:
@@ -107,46 +106,31 @@ class SceneGate:
 
         per_ok, lap_vars, mean_grays = self._measure_patches(frame_bgr, layout)
 
-        skip_tpl = (
-            self._template_match_enabled
-            and self._match_skip_when_stable > 0
-            and self._armed
-            and self._state == STATE_PLAYING
-            and self._stable_frame_count < self._match_skip_when_stable
+        in_playing = self._armed and self._state == STATE_PLAYING
+        match_blocked = (
+            not self._template_match_enabled
+            or (in_playing and self._match_skip_playing)
         )
 
-        if self._template_match_enabled and not skip_tpl:
-            in_playing = self._armed and self._state == STATE_PLAYING
-            if in_playing:
-                ss_ok = False
-                ss_val = 0.0
-                ss_name = ""
-                rs_ok = False
-                rs_val = 0.0
-                rs_name = ""
-                pl_ok, pl_val, pl_name = self._match_templates(
-                    frame_bgr,
-                    self._playing_tpls,
-                    self._playing_thresh,
-                    roi_frac=self._playing_roi,
-                )
-            else:
-                pl_ok = False
-                pl_val = 0.0
-                pl_name = ""
-                ss_ok, ss_val, ss_name = self._match_templates(
-                    frame_bgr,
-                    self._song_select_tpls,
-                    self._song_select_thresh,
-                    roi_frac=self._song_select_roi,
-                )
-                rs_ok, rs_val, rs_name = self._match_templates(
-                    frame_bgr,
-                    self._results_tpls,
-                    self._results_thresh,
-                    roi_frac=self._results_roi,
-                )
-            self._stable_frame_count = 0
+        if not match_blocked:
+            ss_ok, ss_val, ss_name = self._match_templates(
+                frame_bgr,
+                self._song_select_tpls,
+                self._song_select_thresh,
+                roi_frac=self._song_select_roi,
+            )
+            rs_ok, rs_val, rs_name = self._match_templates(
+                frame_bgr,
+                self._results_tpls,
+                self._results_thresh,
+                roi_frac=self._results_roi,
+            )
+            pl_ok, pl_val, pl_name = self._match_templates(
+                frame_bgr,
+                self._playing_tpls,
+                self._playing_thresh,
+                roi_frac=self._playing_roi,
+            )
         else:
             ss_ok = False
             ss_val = 0.0
@@ -157,8 +141,6 @@ class SceneGate:
             pl_ok = False
             pl_val = 0.0
             pl_name = ""
-            if skip_tpl:
-                self._stable_frame_count += 1
 
         drums_present = all(per_ok)
         if ss_ok:

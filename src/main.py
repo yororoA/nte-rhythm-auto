@@ -19,7 +19,9 @@ from src.config_loader import default_config_path, load_config
 from src.detector import RhythmDetector
 from src.keys import AsyncKeyDispatcher, KeySender
 from src.lanes import build_lane_layout, lane_full_roi_slice, lane_roi_quad
-from src.presence import SceneGate
+from src.mouse import MouseClicker
+from src.presence import STATE_OTHER, STATE_PLAYING, STATE_RESULTS, STATE_SONG_SELECT, SceneGate
+from src.song_selector import SongSelector
 from src.window import client_rect_screen, find_unreal_game_window, window_rect_screen
 
 logger = logging.getLogger(__name__)
@@ -137,6 +139,8 @@ def run_loop(
 
     detector = RhythmDetector(cfg)
     scene_gate = SceneGate(cfg)
+    song_selector = SongSelector(cfg)
+    mouse_clicker = MouseClicker(cfg, hwnd if mode == "background" else None)
     run_cfg = cfg.get("run") or {}
     target_fps = max(1, int(run_cfg.get("target_fps", 60)))
     frame_dt = 1.0 / target_fps
@@ -164,10 +168,12 @@ def run_loop(
     logger.info("按 Ctrl+C 停止。窗口: %s", info.title or "(无标题)")
     if (cfg.get("presence") or {}).get("enabled", True):
         logger.info(
-            "已启用「四鼓在场」门控：进入节奏界面并稳定 %d 帧后才按键；离开界面约 %d 帧后自动停止。",
+            "已启用场景门控：进入节奏界面并稳定 %d 帧后才按键；离开界面约 %d 帧后自动停止。",
             scene_gate.arm_after_good_frames,
             scene_gate.disarm_after_bad_frames,
         )
+    if song_selector.enabled:
+        logger.info("已启用自动选歌：进入选歌界面后将自动搜索并选择目标歌曲。")
 
     try:
         while True:
@@ -231,15 +237,34 @@ def run_loop(
                 continue
             fh, fw = frame.shape[:2]
             layout = build_lane_layout(cfg, fw, fh)
-            armed, gate_info = scene_gate.step(frame, layout)
-            if gate_info.get("transitioned"):
+            state, gate_info = scene_gate.step(frame, layout)
+
+            if gate_info.get("state_transitioned"):
+                dyn_ratio = gate_info.get("dynamic_ratio", 0.0)
+                dyn_lane = gate_info.get("per_lane_dynamic", [])
+                btn_ok = gate_info.get("start_button_ok", False)
                 logger.info(
-                    "节奏界面门控: %s | 四轨 Laplace 方差≈%s | 本帧四鼓位通过=%s",
-                    "已解锁（允许按键）" if gate_info.get("armed") else "已锁定（禁止按键）",
-                    [f"{v:.0f}" for v in gate_info.get("lap_vars", [])],
+                    "场景切换 -> %s | 四鼓位通过=%s | 动态率≈%.4f | 开始按钮=%s",
+                    state,
                     gate_info.get("per_ok"),
+                    dyn_ratio,
+                    btn_ok,
                 )
 
+            if state == STATE_SONG_SELECT and song_selector.enabled:
+                cr = client_rect_screen(hwnd)
+                client_origin = (cr[0], cr[1])
+                sel_info = song_selector.step(
+                    frame, layout, mouse_clicker, client_origin=client_origin,
+                )
+            elif state == STATE_SONG_SELECT and not song_selector.enabled:
+                sel_info = {"state": "disabled"}
+            else:
+                sel_info = {"state": "n/a"}
+                if state == STATE_PLAYING:
+                    song_selector.reset()
+
+            armed = bool(gate_info.get("armed", state == STATE_PLAYING))
             triggers, masks, pixels = detector.analyze(frame, layout)
 
             fire_times = dispatcher.drain_fire_times()
@@ -264,8 +289,9 @@ def run_loop(
             if any(triggers) and not armed:
                 if not suppress_hint_logged:
                     logger.info(
-                        "已抑制按键：节奏界面门控未解锁（未稳定检测到四鼓）。"
-                        "进入四键节奏页后会自动开始；若已进入仍不按键，可调 configs/default.yaml -> presence。"
+                        "已抑制按键：场景门控未解锁（当前状态=%s）。"
+                        "进入四键节奏页后会自动开始；若已进入仍不按键，可调 configs/default.yaml -> presence。",
+                        state,
                     )
                     suppress_hint_logged = True
                 dispatcher.clear()
@@ -307,11 +333,18 @@ def run_loop(
                         "title": info.title,
                         "triggers": tuple(triggers),
                         "pixels": tuple(pixels),
+                        "scene_state": state,
                         "scene_armed": armed,
                         "scene_per_ok": tuple(gate_info.get("per_ok", ())),
                         "scene_lap": tuple(
                             round(float(x), 0) for x in gate_info.get("lap_vars", ())
                         ),
+                        "scene_dynamic_ratio": gate_info.get("dynamic_ratio", 0.0),
+                        "scene_is_dynamic": gate_info.get("is_dynamic", True),
+                        "scene_per_lane_dynamic": tuple(gate_info.get("per_lane_dynamic", ())),
+                        "scene_start_btn": gate_info.get("start_button_ok", False),
+                        "song_sel_state": sel_info.get("state", "n/a"),
+                        "song_sel_action": sel_info.get("action", ""),
                         "capture": capture_runtime_status(),
                     }
                 )
@@ -380,9 +413,10 @@ def cmd_test_image(args: argparse.Namespace, cfg: dict[str, Any]) -> int:
     if not path.is_file():
         logger.error("文件不存在: %s", path)
         return 2
-    frame = cv2.imread(str(path))
+    frame = np.fromfile(str(path), dtype=np.uint8)
+    frame = cv2.imdecode(frame, cv2.IMREAD_COLOR)
     if frame is None:
-        logger.error("无法读取图像: %s", path)
+        logger.error("无法读取图像：%s", path)
         return 2
     h, w = frame.shape[:2]
     layout = build_lane_layout(cfg, w, h)

@@ -187,6 +187,8 @@ keys:
   fake_activate: true
   # 识别触发后额外等待多少秒再按键；不同机器可在 GUI 里调，默认 0
   press_delay_sec: 0.0
+  # 按轨独立延迟；F 轨判定线 (0.70) 比其他轨 (0.78) 靠上，需补偿延迟让音符落到实际 hit 区
+  press_delay_sec_by_lane: [0.0, 0.08, 0.0, 0.0]
   key_hold_sec: 0.01
 
 run:

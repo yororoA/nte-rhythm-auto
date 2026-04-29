@@ -36,6 +36,11 @@ class KeySender:
         self._mode = str(keys_cfg.get("mode", "foreground")).lower()
         self._hold = float(keys_cfg.get("key_hold_sec", 0.02))
         self._delay = max(0.0, float(keys_cfg.get("press_delay_sec", 0.0)))
+        raw_delay_by = keys_cfg.get("press_delay_sec_by_lane")
+        if isinstance(raw_delay_by, list) and len(raw_delay_by) == 4:
+            self._delay_by_lane = [max(0.0, float(v)) if v is not None else self._delay for v in raw_delay_by]
+        else:
+            self._delay_by_lane = [self._delay, self._delay, self._delay, self._delay]
         self._hwnd = hwnd
         self._win32_dispatch = str(keys_cfg.get("win32_dispatch", "post")).lower()
         self._fake_activate = bool(keys_cfg.get("fake_activate", True))
@@ -240,10 +245,12 @@ class AsyncKeyDispatcher:
         sorted_lanes = sorted(item.lanes)
         fire_times: dict[int, float] = {}
         for i in sorted_lanes:
+            lane_delay = sender._delay_by_lane[i] if i < len(sender._delay_by_lane) else sender._delay
+            if lane_delay > 0:
+                time.sleep(lane_delay)
             sender.send_keydown(i)
             fire_times[i] = time.perf_counter()
-        time.sleep(sender._hold)
-        for i in sorted_lanes:
+            time.sleep(sender._hold)
             sender.send_keyup(i)
         with self._lock:
             self._fire_time_queue.append(fire_times)

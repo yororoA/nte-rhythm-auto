@@ -291,7 +291,7 @@ def run_loop(
                         ar_dismiss_stage = 2
                         ar_dismiss_start = now_ar
                         logger.info("自动连打: 已发送 ESC")
-                elif ar_dismiss_stage >= 1:
+                elif ar_dismiss_stage >= 1 and state != STATE_RESULTS:
                     ar_remaining -= 1
                     ar_completed_count += 1
                     ar_dismiss_stage = 0
@@ -304,6 +304,10 @@ def run_loop(
                         )
                     else:
                         logger.info("自动连打完成: 共 %d 次", ar_completed_count)
+                        if stop_event is not None:
+                            stop_event.set()
+                        else:
+                            break
 
             armed = bool(gate_info.get("armed", state == STATE_PLAYING))
             triggers, masks, pixels = detector.analyze(frame, layout)

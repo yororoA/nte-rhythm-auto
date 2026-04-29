@@ -116,24 +116,36 @@ class SceneGate:
         )
 
         if self._template_match_enabled and not skip_tpl:
-            ss_ok, ss_val, ss_name = self._match_templates(
-                frame_bgr,
-                self._song_select_tpls,
-                self._song_select_thresh,
-                roi_frac=self._song_select_roi,
-            )
-            rs_ok, rs_val, rs_name = self._match_templates(
-                frame_bgr,
-                self._results_tpls,
-                self._results_thresh,
-                roi_frac=self._results_roi,
-            )
-            pl_ok, pl_val, pl_name = self._match_templates(
-                frame_bgr,
-                self._playing_tpls,
-                self._playing_thresh,
-                roi_frac=self._playing_roi,
-            )
+            in_playing = self._armed and self._state == STATE_PLAYING
+            if in_playing:
+                ss_ok = False
+                ss_val = 0.0
+                ss_name = ""
+                rs_ok = False
+                rs_val = 0.0
+                rs_name = ""
+                pl_ok, pl_val, pl_name = self._match_templates(
+                    frame_bgr,
+                    self._playing_tpls,
+                    self._playing_thresh,
+                    roi_frac=self._playing_roi,
+                )
+            else:
+                pl_ok = False
+                pl_val = 0.0
+                pl_name = ""
+                ss_ok, ss_val, ss_name = self._match_templates(
+                    frame_bgr,
+                    self._song_select_tpls,
+                    self._song_select_thresh,
+                    roi_frac=self._song_select_roi,
+                )
+                rs_ok, rs_val, rs_name = self._match_templates(
+                    frame_bgr,
+                    self._results_tpls,
+                    self._results_thresh,
+                    roi_frac=self._results_roi,
+                )
             self._stable_frame_count = 0
         else:
             ss_ok = False

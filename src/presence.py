@@ -105,6 +105,7 @@ class SceneGate:
             }
 
         per_ok, lap_vars, mean_grays = self._measure_patches(frame_bgr, layout)
+        drums_present = all(per_ok)
 
         in_playing = self._armed and self._state == STATE_PLAYING
         match_blocked = (
@@ -142,7 +143,6 @@ class SceneGate:
             pl_val = 0.0
             pl_name = ""
 
-        drums_present = all(per_ok)
         if ss_ok:
             target = STATE_SONG_SELECT
         elif rs_ok:
@@ -166,21 +166,21 @@ class SceneGate:
             self._state_streak = 0
 
         state_transitioned = prev_state != self._state
-        scene_playing = self._state == STATE_PLAYING
 
-        if scene_playing:
+        prev_armed = self._armed
+
+        if drums_present:
             self._good_streak += 1
             self._bad_streak = 0
         else:
             self._bad_streak += 1
             self._good_streak = 0
 
-        prev_armed = self._armed
         if self._armed:
-            if not scene_playing and self._bad_streak >= self.disarm_after_bad_frames:
+            if self._bad_streak >= self.disarm_after_bad_frames:
                 self._armed = False
         else:
-            if scene_playing and self._good_streak >= self.arm_after_good_frames:
+            if self._good_streak >= self.arm_after_good_frames:
                 self._armed = True
 
         armed_transitioned = prev_armed != self._armed
